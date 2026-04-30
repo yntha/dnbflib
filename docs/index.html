@@ -1,0 +1,1033 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>dnbflib Documentation</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #172026;
+      --muted: #5d6872;
+      --paper: #fbfaf7;
+      --panel: #ffffff;
+      --line: #d9dedf;
+      --accent: #0b6b6b;
+      --accent-strong: #064f4f;
+      --code-bg: #182225;
+      --code-ink: #f1f5f2;
+      --warn-bg: #fff5d8;
+      --warn-line: #d7a93b;
+      --ok-bg: #eaf7f2;
+      --ok-line: #55a889;
+      --shadow: 0 18px 55px rgba(21, 31, 36, 0.12);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.58;
+    }
+
+    a {
+      color: var(--accent-strong);
+      text-decoration-thickness: 0.08em;
+      text-underline-offset: 0.18em;
+    }
+
+    code,
+    pre {
+      font-family: "Cascadia Code", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 290px minmax(0, 1fr);
+      min-height: 100vh;
+    }
+
+    .sidebar {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow-y: auto;
+      padding: 28px 22px;
+      border-right: 1px solid var(--line);
+      background: #f4f1eb;
+    }
+
+    .brand {
+      display: grid;
+      grid-template-columns: 42px 1fr;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 28px;
+    }
+
+    .mark {
+      display: grid;
+      place-items: center;
+      width: 42px;
+      height: 42px;
+      border: 2px solid var(--accent);
+      border-radius: 8px;
+      color: var(--accent-strong);
+      font-weight: 800;
+      letter-spacing: 0;
+    }
+
+    .brand h1 {
+      margin: 0;
+      font-size: 22px;
+      line-height: 1.1;
+      letter-spacing: 0;
+    }
+
+    .brand p {
+      margin: 3px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .nav-title {
+      margin: 24px 0 8px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    nav a {
+      display: block;
+      padding: 7px 0;
+      color: #26343a;
+      font-size: 14px;
+      text-decoration: none;
+    }
+
+    nav a:hover {
+      color: var(--accent-strong);
+    }
+
+    .main {
+      min-width: 0;
+    }
+
+    .hero {
+      padding: 56px clamp(24px, 6vw, 76px) 34px;
+      border-bottom: 1px solid var(--line);
+      background:
+        linear-gradient(135deg, rgba(11, 107, 107, 0.08), rgba(214, 169, 59, 0.08)),
+        var(--paper);
+    }
+
+    .eyebrow {
+      margin: 0 0 8px;
+      color: var(--accent-strong);
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .hero h2 {
+      max-width: 920px;
+      margin: 0;
+      font-size: clamp(40px, 6vw, 72px);
+      line-height: 0.98;
+      letter-spacing: 0;
+    }
+
+    .hero p {
+      max-width: 820px;
+      margin: 22px 0 0;
+      color: #334249;
+      font-size: 19px;
+    }
+
+    .status-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 28px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 10px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.72);
+      color: #243238;
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent);
+    }
+
+    .content {
+      max-width: 1040px;
+      padding: 34px clamp(24px, 6vw, 76px) 80px;
+    }
+
+    section {
+      padding: 38px 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    section:last-child {
+      border-bottom: 0;
+    }
+
+    h3 {
+      margin: 0 0 12px;
+      font-size: 30px;
+      line-height: 1.15;
+      letter-spacing: 0;
+    }
+
+    h4 {
+      margin: 28px 0 10px;
+      font-size: 19px;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 12px 0;
+    }
+
+    ul,
+    ol {
+      padding-left: 22px;
+    }
+
+    li + li {
+      margin-top: 6px;
+    }
+
+    .lead {
+      color: #314047;
+      font-size: 18px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 18px;
+    }
+
+    .card {
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: 0 8px 20px rgba(21, 31, 36, 0.05);
+    }
+
+    .card h4 {
+      margin-top: 0;
+    }
+
+    .diagram {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(120px, 1fr));
+      gap: 10px;
+      align-items: stretch;
+      margin: 20px 0;
+    }
+
+    .step {
+      position: relative;
+      padding: 16px;
+      min-height: 126px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+    }
+
+    .step strong {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--accent-strong);
+    }
+
+    .step span {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .callout {
+      margin: 18px 0;
+      padding: 15px 16px;
+      border-left: 4px solid var(--ok-line);
+      border-radius: 0 8px 8px 0;
+      background: var(--ok-bg);
+    }
+
+    .callout.warning {
+      border-left-color: var(--warn-line);
+      background: var(--warn-bg);
+    }
+
+    pre {
+      overflow-x: auto;
+      margin: 16px 0;
+      padding: 17px 18px;
+      border-radius: 8px;
+      background: var(--code-bg);
+      color: var(--code-ink);
+      font-size: 14px;
+      line-height: 1.5;
+      box-shadow: var(--shadow);
+    }
+
+    code {
+      padding: 0.12em 0.28em;
+      border-radius: 4px;
+      background: rgba(11, 107, 107, 0.1);
+      color: #063f3f;
+      font-size: 0.94em;
+    }
+
+    pre code {
+      padding: 0;
+      background: transparent;
+      color: inherit;
+      font-size: inherit;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 16px 0;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    th,
+    td {
+      padding: 11px 12px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+      font-size: 14px;
+    }
+
+    th {
+      background: #eef3f2;
+      color: #26343a;
+      font-weight: 750;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .footer {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    @media (max-width: 920px) {
+      .layout {
+        display: block;
+      }
+
+      .sidebar {
+        position: static;
+        height: auto;
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      nav {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 2px 18px;
+      }
+
+      .grid,
+      .diagram {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="mark">DN</div>
+        <div>
+          <h1>dnbflib</h1>
+          <p>.NET BinaryFormatter tools for Python</p>
+        </div>
+      </div>
+
+      <nav aria-label="Documentation navigation">
+        <div class="nav-title">Start</div>
+        <a href="#overview">Overview</a>
+        <a href="#choose">Which Tool to Use</a>
+        <a href="#install">Installation</a>
+        <a href="#concepts">Core Concepts</a>
+        <div class="nav-title">Use</div>
+        <a href="#quickstart">Quickstart</a>
+        <a href="#database">Record Database</a>
+        <a href="#editing">Editing Tutorial</a>
+        <a href="#api">API Reference</a>
+        <a href="#troubleshooting">Troubleshooting</a>
+      </nav>
+    </aside>
+
+    <main class="main">
+      <header class="hero">
+        <p class="eyebrow">Library Documentation</p>
+        <h2>dnbflib v1.0.0</h2>
+        <p>
+          dnbflib is a Python library for old .NET <code>BinaryFormatter</code> files. These files are 
+          packed binary snapshots of .NET objects. dnbflib helps you inspect them, change supported 
+          values, and write a new DNBF binary back out.
+        </p>
+      </header>
+
+      <div class="content">
+        <section id="overview">
+          <h3>Library Overview</h3>
+          <p class="lead">
+            Think of a BinaryFormatter file as a saved object graph: objects contain fields, fields can
+            contain numbers or strings, and some fields point to other objects. dnbflib gives you two ways
+            to work with that graph.
+          </p>
+
+          <div class="grid">
+            <article class="card">
+              <h4>Use Python Objects</h4>
+              <p>
+                Open a file with <code>DNBFDocument</code>, find an object by class name, follow fields, edit
+                a value, and write a new binary.
+              </p>
+            </article>
+            <article class="card">
+              <h4>Use YAML Files</h4>
+              <p>
+                Export the binary into a folder of editable YAML and extra raw byte files. Rebuild the folder
+                back into a BinaryFormatter file when you are done.
+              </p>
+            </article>
+            <article class="card">
+              <h4>Keep Unknown Bytes</h4>
+              <p>
+                When dnbflib does not understand a record deeply, it keeps the original bytes. That makes
+                no-edit rebuilds and small edits much safer.
+              </p>
+            </article>
+          </div>
+
+          <div class="diagram" aria-label="dnbflib workflow">
+            <div class="step">
+              <strong>1. Start with a file</strong>
+              <span>A save file, cache, or other .NET BinaryFormatter blob.</span>
+            </div>
+            <div class="step">
+              <strong>2. Scan records</strong>
+              <span>dnbflib finds where each chunk of the binary starts and ends.</span>
+            </div>
+            <div class="step">
+              <strong>3. Decode known parts</strong>
+              <span>Strings, numbers, references, arrays, and class fields are decoded when supported.</span>
+            </div>
+            <div class="step">
+              <strong>4. Make edits</strong>
+              <span>Change supported values through Python or by editing exported YAML.</span>
+            </div>
+            <div class="step">
+              <strong>5. Rebuild</strong>
+              <span>Write a new BinaryFormatter file, preserving untouched bytes.</span>
+            </div>
+          </div>
+
+          <div class="callout">
+            <strong>Main idea:</strong> dnbflib does not need to understand every byte to be useful. It can keep
+            unknown records exactly as they were and only rebuild the records you changed.
+          </div>
+
+          <div class="callout warning">
+            <strong>Safety:</strong> BinaryFormatter data is unsafe when it comes from an untrusted source. Use dnbflib
+            for inspection, migration, recovery, and editing of files you already trust.
+          </div>
+        </section>
+
+        <section id="choose">
+          <h3>Which Tool to Use</h3>
+          <p>
+            Start with the workflow that matches how you want to edit the file.
+          </p>
+
+          <div class="grid">
+            <article class="card">
+              <h4>Use <code>DNBFDocument</code></h4>
+              <ul>
+                <li>You want to edit with Python only.</li>
+                <li>You know the class or field names you are looking for.</li>
+                <li>You want lower memory use for large files.</li>
+              </ul>
+            </article>
+            <article class="card">
+              <h4>Use YAML Export</h4>
+              <ul>
+                <li>You want to browse the file in a text editor.</li>
+                <li>You want one editable folder/file set for each record.</li>
+                <li>You want to rebuild later from edited YAML.</li>
+              </ul>
+            </article>
+            <article class="card">
+              <h4>Use <code>DNBFRecordStore</code></h4>
+              <ul>
+                <li>You want a SQLite index of records.</li>
+                <li>You want to inspect offsets, sizes, and object IDs.</li>
+                <li>You are building custom tooling on top of dnbflib.</li>
+              </ul>
+            </article>
+          </div>
+
+          <div class="callout warning">
+            <strong>Current edit limit:</strong> dnbflib can change only the kinds of records it already
+            knows how to write. Unknown records are kept unchanged, not rewritten.
+          </div>
+        </section>
+
+        <section id="install">
+          <h3>Installation</h3>
+          <p>
+            dnbflib requires Python 3.11 or newer. It depends on <code>pydatastreams</code>, which
+            installs the Python module named <code>datastream</code>.
+          </p>
+
+          <h4>PowerShell</h4>
+          <p>
+            When running from a checkout without installing the package, point Python at the local
+            <code>src</code> folder first.
+          </p>
+          <pre><code>$env:PYTHONPATH = "src"
+python -c "from dnbflib import DNBFRecordStore; print(DNBFRecordStore)"</code></pre>
+
+          <h4>Package Install</h4>
+          <pre><code>python -m pip install -e .</code></pre>
+
+          <h4>PyPI</h4>
+          <pre><code>pip install dnbflib</code></pre>
+        </section>
+
+        <section id="concepts">
+          <h3>Core Concepts</h3>
+
+          <h4>Records</h4>
+          <p>
+            A BinaryFormatter file is not one big object. It is a list of smaller chunks called records.
+            One record might say "this is a string," another might say "this object has these fields,"
+            and another might say "this field points to object 42." dnbflib scans those records in order.
+          </p>
+
+          <h4>Object IDs and References</h4>
+          <p>
+            BinaryFormatter often gives objects numeric IDs. A field may not contain the object directly;
+            it may contain a reference to an ID instead. When you call <code>member.deref()</code>,
+            dnbflib follows that reference and gives you the target object.
+          </p>
+
+          <h4>Raw Bytes</h4>
+          <p>
+            Every record has original bytes in the source file. dnbflib keeps those bytes around. If a record
+            is not edited, those exact bytes can be written back out unchanged.
+          </p>
+
+          <h4>Decoded Views</h4>
+          <p>
+            A decoded view is dnbflib's best human-readable explanation of a record. For example, a class record
+            might decode into a class name and a list of fields. If a decoded field is marked editable, dnbflib
+            knows how to rebuild that part safely.
+          </p>
+        </section>
+
+        <section id="quickstart">
+          <h3>Quickstart</h3>
+          <p>
+            This script checks the safest promise first: export a binary, rebuild it without edits, and verify
+            that the rebuilt bytes match the input exactly.
+          </p>
+
+          <pre><code>from pathlib import Path
+
+from dnbflib import export_dnbf_to_yaml, rebuild_yaml_export
+
+input_path = Path("src/test.bin")
+export_dir = Path("parsed_yaml")
+
+export_dnbf_to_yaml(input_path, export_dir)
+rebuilt = rebuild_yaml_export(export_dir)
+
+print("roundtrip:", rebuilt == input_path.read_bytes())</code></pre>
+
+          <p>
+            If this prints <code>roundtrip: True</code>, the export folder can rebuild the original file exactly.
+            After that, make one small edit at a time and rebuild again.
+          </p>
+
+          <h4>Command Line</h4>
+          <p>
+            The included example script does the same thing from PowerShell or a terminal.
+          </p>
+
+          <pre><code>python examples/export_to_yaml.py save.dat save_export --verify</code></pre>
+        </section>
+
+        <section id="database">
+          <h3>Record Database</h3>
+          <p>
+            <code>DNBFRecordStore</code> is a SQLite-backed table of records. You usually do not need it
+            for simple edits, but it is useful when you want to inspect a file by offsets and IDs.
+          </p>
+
+          <div class="callout">
+            <strong>Cache use:</strong> a record store can act as a reusable index for a binary you inspect
+            repeatedly. Save it next to the source file, keep the source hash in metadata, and reuse it for
+            faster record lookup later. It is not a fully deserialized object cache; it stores record metadata
+            and original bytes.
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>Column</th>
+                <th>Meaning</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>sequence</code></td>
+                <td>The record number in file order.</td>
+              </tr>
+              <tr>
+                <td><code>offset</code>, <code>size</code></td>
+                <td>Where the record starts in the binary and how many bytes it occupies.</td>
+              </tr>
+              <tr>
+                <td><code>record_type</code>, <code>record_type_name</code></td>
+                <td>The kind of record, such as string, array, class, reference, or message end.</td>
+              </tr>
+              <tr>
+                <td><code>object_id</code>, <code>library_id</code>, <code>reference_id</code>, <code>metadata_id</code></td>
+                <td>IDs used to connect objects and references when the binary contains them.</td>
+              </tr>
+              <tr>
+                <td><code>raw</code></td>
+                <td>The original bytes for this record, used for lossless rebuilds.</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h4>Query Records</h4>
+          <pre><code>from dnbflib import DNBFRecordStore
+
+store = DNBFRecordStore("parsed.dnbf.sqlite3")
+
+print("source sha256:", store.get_metadata("source_sha256"))
+
+for record in store.iter_records():
+    print(record.sequence, record.record_type.name, record.offset, record.size)</code></pre>
+
+          <h4>Find an Object by ID</h4>
+          <p>
+            This is low-level. For normal object navigation, prefer <code>DNBFDocument</code>.
+          </p>
+          <pre><code>stored = store.get_by_object_id(42)
+print(stored.record_type.name)
+print(stored.raw.hex())</code></pre>
+        </section>
+
+        <section id="editing">
+          <h3>Editing Tutorial</h3>
+          <p>
+            There are two editing styles. Use <code>DNBFDocument</code> when you know the object and field
+            names. Use YAML export when you want to inspect records by hand before deciding what to change.
+          </p>
+
+          <h4>Edit Through Object Traversal</h4>
+          <p>
+            This example finds one <code>Life</code> object, follows its <code>Finances</code> field, changes
+            <code>BankBalance</code>, and writes a new file.
+          </p>
+          <pre><code>from pathlib import Path
+
+from dnbflib import DNBFDocument
+
+input_path = Path("save.dat")
+output_path = Path("edited.bin")
+
+with DNBFDocument.open(input_path) as doc:
+    life = doc.one(class_name="Life", where=lambda obj: obj.member("Name").value == "Alex")
+    finances = life.member("Finances").deref()
+    finances.member("BankBalance").set(123456)
+    doc.write(output_path)</code></pre>
+
+          <div class="callout warning">
+            If more than one object matches <code>class_name="Life"</code>, use a <code>where</code> filter
+            so dnbflib knows which instance you mean.
+          </div>
+
+          <h4>Edit Through YAML</h4>
+          <p>
+            In an exported record file, <code>raw.bin</code> is the original record bytes and
+            <code>record.yaml</code> describes how to rebuild that record. If a decoded value is editable,
+            set <code>rebuild</code> to <code>decoded</code> and change the decoded field.
+          </p>
+
+          <div class="callout warning">
+            <strong>Edit only value fields:</strong> change fields such as <code>value</code>,
+            <code>values</code>, string text, or other fields explicitly marked <code>editable: true</code>.
+            Do not change structural fields such as <code>record_type</code>, <code>sequence</code>,
+            <code>offset</code>, <code>size</code>, <code>value_offset</code>, <code>value_size</code>,
+            <code>raw_path</code>, <code>decoded_path</code>, object IDs, reference IDs, library IDs, or
+            metadata IDs unless you are intentionally changing the BinaryFormatter graph and know how to
+            update every related reference.
+          </div>
+
+          <div class="callout">
+            <strong>Safe habit:</strong> export, rebuild once without edits, then make one small YAML edit and
+            rebuild again. If the edited file fails to load, revert that one change before trying another.
+          </div>
+
+          <div class="callout">
+            <strong>Following object fields:</strong> instance fields often store a reference instead of the
+            full object inline. In YAML, those fields may show a reference ID plus a <code>ref_path</code>.
+            Open the file at <code>ref_path</code> to inspect or edit the referenced object. For example,
+            a <code>Life</code> field named <code>Finances</code> may point to a separate
+            <code>Game.Finances</code> record file rather than containing the balance fields directly.
+          </div>
+
+          <p>
+            In a <code>Life</code> record, the member might look like this:
+          </p>
+
+          <pre><code>{
+  "name": "&lt;Finances&gt;k__BackingField",
+  "binary_type": "Class",
+  "editable": true,
+  "record_type": "MemberReference",
+  "ref_id": 42,
+  "ref_path": "records/objects/Game.Finances/000128_ClassWithMembersAndTypes/record.yaml"
+}</code></pre>
+
+          <p>
+            That means the field does not contain the finances data here. It points to object
+            <code>42</code>. Open the referenced <code>record.yaml</code> and edit the value fields there:
+          </p>
+
+          <pre><code>{
+  "record_type": "ClassWithMembersAndTypes",
+  "decoded": {
+    "type": "ClassWithMembersAndTypes",
+    "fields": {
+      "class_name": "Game.Finances",
+      "members": [
+        {
+          "name": "&lt;BankBalance&gt;k__BackingField",
+          "binary_type": "Primitive",
+          "editable": true,
+          "primitive_type": "Int64",
+          "value": 123456,
+          "value_offset": 184,
+          "value_size": 8
+        }
+      ]
+    }
+  }
+}</code></pre>
+
+          <h4>Can I Insert New Objects?</h4>
+          <p>
+            Not safely yet. dnbflib currently supports editing supported values inside records that already
+            exist. It does not currently provide a high-level API for adding a brand-new object to the
+            BinaryFormatter graph.
+          </p>
+
+          <div class="callout warning">
+            <strong>Why insertion is harder:</strong> a new object needs a new object ID, one or more new
+            records, correct placement in the record stream, and updated references from existing objects.
+            Some arrays or class fields may also need count, type, or member metadata updates. If any related
+            reference is missed, the target application may reject the file or load the wrong object graph.
+          </div>
+
+          <p>
+            For now, use dnbflib to change existing objects and existing fields. If you need insertion support,
+            it should be implemented as a dedicated graph-editing feature that allocates IDs, writes the required
+            records, and updates every referencing record together.
+          </p>
+
+          <h4>Scalar Number Example</h4>
+          <p>
+            This changes one standalone primitive integer record from its old value to <code>250</code>.
+          </p>
+
+          <pre><code>{
+  "record_type": "MemberPrimitiveTyped",
+  "rebuild": "decoded",
+  "decoded": {
+    "editable": true,
+    "type": "MemberPrimitiveTyped",
+    "fields": {
+      "primitive_type": "Int32",
+      "value": 250
+    }
+  }
+}</code></pre>
+
+          <p>
+            For primitive arrays, edit the numbers in <code>decoded.fields.values</code>.
+          </p>
+
+          <pre><code>{
+  "record_type": "ArraySinglePrimitive",
+  "rebuild": "decoded",
+  "decoded": {
+    "editable": true,
+    "type": "ArraySinglePrimitive",
+    "fields": {
+      "object_id": 55,
+      "primitive_type": "Int16",
+      "values": [1, 9, 3]
+    }
+  }
+}</code></pre>
+
+          <p>
+            For class records, primitive fields appear as member entries. The <code>value_offset</code> and
+            <code>value_size</code> fields tell dnbflib exactly where the old value lives inside the original
+            raw record, so it can patch that value while preserving the rest.
+          </p>
+
+          <pre><code>{
+  "record_type": "ClassWithMembersAndTypes",
+  "rebuild": "decoded",
+  "decoded": {
+    "type": "ClassWithMembersAndTypes",
+    "fields": {
+      "class_name": "Person",
+      "members": [
+        {
+          "name": "Age",
+          "binary_type": "Primitive",
+          "editable": true,
+          "primitive_type": "Int32",
+          "value": 31,
+          "value_offset": 42,
+          "value_size": 4
+        }
+      ]
+    }
+  }
+}</code></pre>
+        </section>
+
+        <section id="api">
+          <h3>API Reference</h3>
+
+          <h4><code>DNBFDocument</code></h4>
+          <p>
+            Use this API for Python-only object traversal and editing.
+          </p>
+          <pre><code>from dnbflib import DNBFDocument
+
+with DNBFDocument.open("save.dat") as doc:
+    life = doc.one(class_name="Life", where=lambda obj: obj.member("Name").value == "Alex")
+    finances = life.member("Finances").deref()
+    finances.member("BankBalance").set(123456)
+    doc.write("edited.dat")</code></pre>
+          <table>
+            <thead>
+              <tr>
+                <th>Member</th>
+                <th>Description</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>DNBFDocument.open(path)</code></td>
+                <td>Open a BinaryFormatter file and build a lightweight record offset index.</td>
+              </tr>
+              <tr>
+                <td><code>objects(class_name=None)</code></td>
+                <td>Return decoded objects, optionally filtered by class name.</td>
+              </tr>
+              <tr>
+                <td><code>one(class_name=..., where=...)</code></td>
+                <td>Return exactly one matching object. Raises an error if there are zero or many.</td>
+              </tr>
+              <tr>
+                <td><code>node.member(name)</code></td>
+                <td>Find a field/member on an object. Backing-field names are simplified when possible.</td>
+              </tr>
+              <tr>
+                <td><code>member.deref()</code></td>
+                <td>Follow a reference field to the object it points at.</td>
+              </tr>
+              <tr>
+                <td><code>member.set(value)</code></td>
+                <td>Change a supported decoded value and mark its record for rebuild.</td>
+              </tr>
+              <tr>
+                <td><code>write(path)</code></td>
+                <td>Write the edited binary to disk. Prefer this over <code>to_bytes()</code> for large files.</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h4><code>DNBFRecordStore</code></h4>
+          <p>
+            Use this API when you want the low-level record table.
+          </p>
+          <table>
+            <thead>
+              <tr>
+                <th>Member</th>
+                <th>Description</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>add_record(record, offset, size, raw)</code></td>
+                <td>Store a writable record object plus its original bytes.</td>
+              </tr>
+              <tr>
+                <td><code>add_raw_record(...)</code></td>
+                <td>Store a record when you already know its type, offset, IDs, and bytes.</td>
+              </tr>
+              <tr>
+                <td><code>iter_records()</code></td>
+                <td>Loop over stored records in the same order as the source file.</td>
+              </tr>
+              <tr>
+                <td><code>get_by_object_id(object_id)</code></td>
+                <td>Find the first record that defines the requested object ID.</td>
+              </tr>
+              <tr>
+                <td><code>to_bytes()</code></td>
+                <td>Rebuild bytes by joining all stored raw records in order.</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h4><code>DNBFWriter</code></h4>
+          <p>
+            Use this API when you already have raw records or stored records and want bytes back.
+          </p>
+          <table>
+            <thead>
+              <tr>
+                <th>Member</th>
+                <th>Description</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>DNBFWriter(records=None)</code></td>
+                <td>Create a writer from writable record objects, stored records, or raw byte chunks.</td>
+              </tr>
+              <tr>
+                <td><code>DNBFWriter.from_record_store(store)</code></td>
+                <td>Create a writer from all records in a <code>DNBFRecordStore</code>.</td>
+              </tr>
+              <tr>
+                <td><code>to_bytes()</code></td>
+                <td>Return the rebuilt BinaryFormatter bytes.</td>
+              </tr>
+              <tr>
+                <td><code>write_path(path)</code></td>
+                <td>Write the rebuilt BinaryFormatter bytes to a path.</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h4>Top-Level Exports</h4>
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Description</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>export_dnbf_to_yaml</code>, <code>export_record_store_to_yaml</code>, <code>rebuild_yaml_export</code></td>
+                <td>Export a binary or record store to editable YAML, then rebuild it.</td>
+              </tr>
+              <tr>
+                <td><code>RecordTypeEnumeration</code>, <code>BinaryTypeEnumeration</code>, <code>PrimitiveTypeEnumeration</code></td>
+                <td>Named constants for BinaryFormatter record, member, and primitive value types.</td>
+              </tr>
+              <tr>
+                <td><code>BinaryObjectString</code></td>
+                <td>Small helper for constructing a writable BinaryFormatter string record.</td>
+              </tr>
+              <tr>
+                <td>Traversal errors</td>
+                <td>Errors raised when object or member lookup is missing or ambiguous.</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="troubleshooting">
+          <h3>Troubleshooting</h3>
+
+          <h4><code>ModuleNotFoundError: No module named 'datastream'</code></h4>
+          <p>
+            Install <code>pydatastreams</code> or activate the environment where it is already installed.
+            The package name is <code>pydatastreams</code>, but the Python import name is <code>datastream</code>.
+          </p>
+
+          <h4>The rebuilt file does not match the input</h4>
+          <p>
+            First test a no-edit YAML round trip with <code>rebuild_yaml_export(...)</code>. If an untouched
+            export does not rebuild exactly, stop and inspect the record mentioned by the error before editing.
+          </p>
+
+          <h4>A specific record type fails while exporting</h4>
+          <p>
+            The error should include a record type or offset. Use that to inspect the exported
+            <code>record.yaml</code> and <code>raw.bin</code>. The scanner or decoded rebuild code may need
+            support for that record shape.
+          </p>
+
+          <h4>References point to the old value</h4>
+          <p>
+            References usually point to object IDs, not byte offsets. If you edit a value while keeping the same
+            object ID, references should still point to it. Be careful when changing object IDs or adding new objects.
+          </p>
+        </section>
+      </div>
+    </main>
+  </div>
+</body>
+</html>
