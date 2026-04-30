@@ -7,4 +7,6 @@ output.log
 src/output.log
 src/test.bin.bak
 src/test.py
+src/test.bin
 .vscode/
+tests/test_integration_sample.py
