@@ -765,25 +765,115 @@ with DNBFDocument.open(input_path) as doc:
   }
 }</code></pre>
 
-          <h4>Can I Insert New Objects?</h4>
+          <h4>Create New Object Instances</h4>
           <p>
-            Not safely yet. dnbflib currently supports editing supported values inside records that already
-            exist. It does not currently provide a high-level API for adding a brand-new object to the
-            BinaryFormatter graph.
+            dnbflib can create a new instance of a class when the binary already contains class metadata for
+            that type. In normal terms: find an existing object of the same class, use it as the template, then
+            set the fields you want to change.
+          </p>
+
+          <pre><code>from dnbflib import DNBFDocument
+
+with DNBFDocument.open("save.dat") as doc:
+    life = doc.one(class_name="Life", where=lambda obj: obj.member("Name").value == "Alex")
+    old_finances = life.member("Finances").deref()
+
+    new_finances = old_finances.new_instance({
+        "BankBalance": 999999,
+        "Debt": 0,
+    })
+
+    life.member("Finances").set(new_finances)
+    doc.write("edited.dat")</code></pre>
+
+          <p>
+            <code>new_instance(...)</code> writes a new <code>ClassWithId</code> record that reuses existing
+            class metadata. Passing a <code>DNBFObjectNode</code> or <code>DNBFArrayNode</code> to
+            <code>member.set(...)</code> stores a BinaryFormatter reference to that new node.
           </p>
 
           <div class="callout warning">
-            <strong>Why insertion is harder:</strong> a new object needs a new object ID, one or more new
-            records, correct placement in the record stream, and updated references from existing objects.
-            Some arrays or class fields may also need count, type, or member metadata updates. If any related
-            reference is missed, the target application may reject the file or load the wrong object graph.
+            <strong>Use a real template:</strong> the template must be an object of the class you want to
+            create. If there are many possible templates, use <code>doc.one(..., where=...)</code> so you know
+            which one you copied.
           </div>
 
+          <h4>Edit Existing Arrays</h4>
           <p>
-            For now, use dnbflib to change existing objects and existing fields. If you need insertion support,
-            it should be implemented as a dedicated graph-editing feature that allocates IDs, writes the required
-            records, and updates every referencing record together.
+            If a field already points to an array, follow the reference once and edit the array directly. You
+            do not need to call <code>set(...)</code> on the owning field afterward because the field still
+            points at the same array record.
           </p>
+
+          <pre><code>with DNBFDocument.open("save.dat") as doc:
+    life = doc.find_class("Life")
+    inventory = life.member("Inventory").deref()
+
+    inventory[0] = None
+    inventory.append("loose note")
+    inventory.insert(1, inventory[2])
+    del inventory[3]
+    inventory.resize(10, fill=None)
+
+    doc.write("edited.dat")</code></pre>
+
+          <p>
+            Length changes are supported for <code>ArraySinglePrimitive</code>, <code>ArraySingleString</code>,
+            and <code>ArraySingleObject</code>. <code>BinaryArray</code> length changes are rejected for now
+            because multidimensional and offset arrays need explicit shape-aware editing.
+          </p>
+
+          <h4>Create New Arrays</h4>
+          <p>
+            Use the constructor that matches the array you want. This keeps the code clear and avoids guessing
+            the wrong BinaryFormatter array type.
+          </p>
+
+          <pre><code>from dnbflib import DNBFDocument, PrimitiveTypeEnumeration
+
+with DNBFDocument.open("save.dat") as doc:
+    life = doc.find_class("Life")
+
+    scores = doc.new_primitive_array(
+        [100, 250, 500],
+        item_type=PrimitiveTypeEnumeration.Int32,
+    )
+    life.member("Scores").set(scores)
+
+    tags = doc.new_string_array(["edited", "rich", None])
+    life.member("Tags").set(tags)
+
+    doc.write("edited.dat")</code></pre>
+
+          <p>
+            Object arrays contain references, strings, or nulls. If the field declares a specific item type,
+            you can read that from the field before touching the existing array contents.
+          </p>
+
+          <pre><code>with DNBFDocument.open("save.dat") as doc:
+    life = doc.find_class("Life")
+    inventory_field = life.member("Inventory")
+
+    print(inventory_field.declared_type)  # "Game.Item[]"
+    print(inventory_field.item_type)      # "Game.Item"
+
+    item_template = inventory_field.get_item_template()
+    potion = item_template.new_instance({
+        "Name": "Potion",
+        "Quantity": 10,
+    })
+
+    new_inventory = doc.new_object_array([potion, None])
+    inventory_field.set(new_inventory)
+
+    doc.write("edited.dat")</code></pre>
+
+          <div class="callout">
+            <strong>Where item type comes from:</strong> <code>ArraySingleObject</code> records usually do not
+            store a .NET item type by themselves. The class field that points to the array often stores it, such
+            as <code>Game.Item[]</code>. Use <code>member.item_type</code> from the owning field when you need
+            to know what the array is supposed to contain.
+          </div>
 
           <h4>Scalar Number Example</h4>
           <p>
@@ -890,11 +980,43 @@ with DNBFDocument.open("save.dat") as doc:
               </tr>
               <tr>
                 <td><code>member.deref()</code></td>
-                <td>Follow a reference field to the object it points at.</td>
+                <td>Follow a reference field to the object or array it points at.</td>
               </tr>
               <tr>
                 <td><code>member.set(value)</code></td>
                 <td>Change a supported decoded value and mark its record for rebuild.</td>
+              </tr>
+              <tr>
+                <td><code>member.declared_type</code></td>
+                <td>Return the declared .NET type when the class metadata provides one.</td>
+              </tr>
+              <tr>
+                <td><code>member.item_type</code></td>
+                <td>Return the declared item type for fields such as <code>Game.Item[]</code>.</td>
+              </tr>
+              <tr>
+                <td><code>member.get_item_template()</code></td>
+                <td>Find the one object template matching the member's declared array item type.</td>
+              </tr>
+              <tr>
+                <td><code>node.new_instance(values)</code></td>
+                <td>Create a new object instance using an existing object as the class template.</td>
+              </tr>
+              <tr>
+                <td><code>new_primitive_array(...)</code></td>
+                <td>Create a new one-dimensional primitive array.</td>
+              </tr>
+              <tr>
+                <td><code>new_string_array(...)</code></td>
+                <td>Create a new one-dimensional string array.</td>
+              </tr>
+              <tr>
+                <td><code>new_object_array(...)</code></td>
+                <td>Create a new one-dimensional object array.</td>
+              </tr>
+              <tr>
+                <td><code>DNBFArrayNode</code></td>
+                <td>Read, assign, append, insert, delete, and resize supported one-dimensional arrays.</td>
               </tr>
               <tr>
                 <td><code>write(path)</code></td>
