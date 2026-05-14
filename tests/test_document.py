@@ -216,6 +216,85 @@ class DocumentTraversalTests(unittest.TestCase):
             self.assertEqual(items[1].object_id, 5)
             self.assertIsNone(items[2])
 
+    def test_array_node_edits_primitive_items_in_place(self) -> None:
+        inventory = _array_single_primitive_record(9, PrimitiveTypeEnumeration.Int32, [10, 20, 30])
+        life = _reference_class_record(
+            object_id=1,
+            class_name="Game.Life",
+            member_name="<Inventory>k__BackingField",
+            ref_type_name="System.Int32[]",
+            ref_id=9,
+        )
+        self.temp_path.write_bytes(inventory + life + b"\x0b")
+
+        with DNBFDocument.open(self.temp_path) as doc:
+            inventory_node = doc.find_class("Life").member("Inventory").deref()
+            inventory_node[1] = 99
+
+            expected = _array_single_primitive_record(9, PrimitiveTypeEnumeration.Int32, [10, 99, 30]) + life + b"\x0b"
+            self.assertEqual(inventory_node.to_list(), [10, 99, 30])
+            self.assertEqual(doc.to_bytes(), expected)
+
+    def test_array_node_edits_record_items_in_place(self) -> None:
+        first_item = _primitive_class_record(object_id=5, class_name="Game.Item", member_name="Value", value=42)
+        second_item = _primitive_class_record(object_id=6, class_name="Game.Item", member_name="Value", value=84)
+        inventory = (
+            struct.pack("<Bii", RecordTypeEnumeration.ArraySingleObject, 9, 3)
+            + BinaryObjectString(10, "red").to_bytes()
+            + struct.pack("<Bi", RecordTypeEnumeration.MemberReference, 5)
+            + struct.pack("B", RecordTypeEnumeration.ObjectNull)
+        )
+        life = _reference_class_record(
+            object_id=1,
+            class_name="Game.Life",
+            member_name="<Inventory>k__BackingField",
+            ref_type_name="System.Object[]",
+            ref_id=9,
+        )
+        self.temp_path.write_bytes(first_item + second_item + inventory + life + b"\x0b")
+
+        with DNBFDocument.open(self.temp_path) as doc:
+            inventory_node = doc.find_class("Life").member("Inventory").deref()
+            inventory_node[0] = "blue"
+            inventory_node[1] = doc.object(6)
+            inventory_node[2] = "green"
+
+            expected_inventory = (
+                struct.pack("<Bii", RecordTypeEnumeration.ArraySingleObject, 9, 3)
+                + BinaryObjectString(10, "blue").to_bytes()
+                + struct.pack("<Bi", RecordTypeEnumeration.MemberReference, 6)
+                + BinaryObjectString(11, "green").to_bytes()
+            )
+            self.assertEqual(inventory_node[0], "blue")
+            self.assertEqual(inventory_node[1].object_id, 6)
+            self.assertEqual(inventory_node[2], "green")
+            self.assertEqual(doc.to_bytes(), first_item + second_item + expected_inventory + life + b"\x0b")
+
+    def test_reference_member_can_be_set_to_array_node(self) -> None:
+        first_inventory = _array_single_primitive_record(9, PrimitiveTypeEnumeration.Int32, [10])
+        second_inventory = _array_single_primitive_record(10, PrimitiveTypeEnumeration.Int32, [20])
+        life = _reference_class_record(
+            object_id=1,
+            class_name="Game.Life",
+            member_name="<Inventory>k__BackingField",
+            ref_type_name="System.Int32[]",
+            ref_id=9,
+        )
+        self.temp_path.write_bytes(first_inventory + second_inventory + life + b"\x0b")
+
+        with DNBFDocument.open(self.temp_path) as doc:
+            life_node = doc.find_class("Life")
+            life_node.member("Inventory").set(doc.object(10))
+
+            expected_life = _reference_class_record(
+                object_id=1,
+                class_name="Game.Life",
+                member_name="<Inventory>k__BackingField",
+                ref_type_name="System.Int32[]",
+                ref_id=10,
+            )
+            self.assertEqual(doc.to_bytes(), first_inventory + second_inventory + expected_life + b"\x0b")
+
 
 def _lp(value: str) -> bytes:
     encoded = value.encode("utf-8")

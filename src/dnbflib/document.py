@@ -5,7 +5,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, BinaryIO
 
-from dnbflib.decoded import decode_supported_record, encode_class_member_value
+from dnbflib.decoded import decode_supported_record, encode_class_member_value, encode_supported_record
 from dnbflib.indexer import DNBFRecordStore, StoredRecord
 from dnbflib.records import (
     BinaryObjectString,
@@ -381,6 +381,10 @@ class DNBFDocument:
         if not isinstance(fields, dict):
             return self._record_raw(entry["record"])
 
+        record: IndexedRecord = entry["record"]
+        if record.record_type in _ARRAY_RECORD_TYPES:
+            return encode_supported_record(decoded)
+
         members = fields.get("members")
         if not isinstance(members, list):
             return self._record_raw(entry["record"])
@@ -573,6 +577,22 @@ class DNBFArrayNode:
     def __getitem__(self, index: int) -> Any:
         return self._items()[index]
 
+    def __setitem__(self, index: int, value: Any) -> None:
+        fields = self._fields
+        values = fields.get("values")
+        if isinstance(values, list):
+            values[index] = value
+            self.document._mark_dirty(self._entry)
+            return
+
+        items = fields.get("items")
+        if isinstance(items, list):
+            items[index] = _array_item_from_value(self.document, items[index], value)
+            self.document._mark_dirty(self._entry)
+            return
+
+        raise DNBFDocumentError(f"{self!r} does not expose editable array items")
+
     def __iter__(self):
         return iter(self._items())
 
@@ -653,10 +673,8 @@ class DNBFMemberNode:
             raise DNBFDocumentError(f"member {self.name!r} is not editable")
 
         if self.is_reference:
-            if isinstance(value, DNBFObjectNode):
-                self._member["ref_id"] = value.object_id
-            else:
-                self._member["ref_id"] = int(value)
+            ref_id = _reference_id_from_value(value)
+            self._member["ref_id"] = ref_id if ref_id is not None else int(value)
         else:
             self._member["value"] = value
 
@@ -776,6 +794,37 @@ def _array_item_value(document: DNBFDocument, item: Any) -> Any:
     if record_type == "ObjectNull":
         return None
     return item
+
+
+def _array_item_from_value(document: DNBFDocument, current_item: Any, value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+
+    if value is None:
+        return {"record_type": "ObjectNull", "editable": False}
+
+    if isinstance(value, str):
+        object_id = None
+        if isinstance(current_item, dict) and current_item.get("record_type") == "BinaryObjectString":
+            object_id = current_item.get("object_id")
+        if object_id is None:
+            object_id = document._allocate_object_id()
+        return {
+            "record_type": "BinaryObjectString",
+            "editable": True,
+            "object_id": int(object_id),
+            "value": value,
+        }
+
+    ref_id = _reference_id_from_value(value)
+    if ref_id is not None:
+        return {
+            "record_type": "MemberReference",
+            "editable": True,
+            "ref_id": ref_id,
+        }
+
+    raise DNBFDocumentError(f"array item cannot be set to {value!r}")
 
 
 def _member_name_aliases(name: str) -> set[str]:
