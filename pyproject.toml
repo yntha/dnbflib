@@ -32,6 +32,25 @@ Source = "https://github.com/yntha/dnbflib"
 [tool.hatch.version]
 path = "src/dnbflib/__about__.py"
 
+[tool.hatch.build.targets.wheel]
+packages = ["src/dnbflib"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/docs",
+  "/examples",
+  "/src/dnbflib",
+  "/tests",
+  "/LICENSE.txt",
+  "/README.md",
+  "/pyproject.toml",
+]
+exclude = [
+  "/dist",
+  "/test_dump",
+  "/MEMORY.md",
+]
+
 [tool.hatch.envs.default]
 dependencies = [
   "coverage[toml]>=6.5",
