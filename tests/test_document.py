@@ -8,6 +8,7 @@ from dnbflib import (
     AmbiguousObjectError,
     BinaryTypeEnumeration,
     DNBFDocument,
+    MemberNotFoundError,
     PrimitiveTypeEnumeration,
     RecordTypeEnumeration,
 )
@@ -102,6 +103,70 @@ class DocumentTraversalTests(unittest.TestCase):
             self.assertEqual(doc.object(6).object_id, 6)
             self.assertEqual(doc.to_bytes(), source[:-1] + inserted + b"\x0b")
 
+    def test_object_node_creates_new_instance_from_template(self) -> None:
+        finances = _primitive_class_record(
+            object_id=5,
+            class_name="Game.Finances",
+            member_name="<BankBalance>k__BackingField",
+            value=100,
+        )
+        life = _reference_class_record(
+            object_id=1,
+            class_name="Game.Life",
+            member_name="<Finances>k__BackingField",
+            ref_type_name="Game.Finances",
+            ref_id=5,
+        )
+        source = finances + life + b"\x0b"
+        self.temp_path.write_bytes(source)
+
+        with DNBFDocument.open(self.temp_path) as doc:
+            life_node = doc.find_class("Life")
+            new_finances = life_node.member("Finances").deref().new_instance({"BankBalance": 999999})
+            life_node.member("Finances").set(new_finances)
+
+            expected = (
+                finances
+                + _reference_class_record(
+                    object_id=1,
+                    class_name="Game.Life",
+                    member_name="<Finances>k__BackingField",
+                    ref_type_name="Game.Finances",
+                    ref_id=6,
+                )
+                + struct.pack("<Biii", RecordTypeEnumeration.ClassWithId, 6, 5, 999999)
+                + b"\x0b"
+            )
+            self.assertEqual(new_finances.object_id, 6)
+            self.assertEqual(new_finances.record_type, "ClassWithId")
+            self.assertEqual(new_finances.member("BankBalance").value, 999999)
+            self.assertEqual(doc.to_bytes(), expected)
+
+    def test_object_node_creates_new_instance_with_string_member(self) -> None:
+        source = _string_class_record(object_id=5, class_name="Game.Person", member_name="Name", value="Alex") + b"\x0b"
+        self.temp_path.write_bytes(source)
+
+        with DNBFDocument.open(self.temp_path) as doc:
+            person = doc.find_class("Person")
+            new_person = person.new_instance(Name="Sam")
+
+            expected_insert = (
+                struct.pack("<Bii", RecordTypeEnumeration.ClassWithId, 9, 5)
+                + struct.pack("<Bi", RecordTypeEnumeration.BinaryObjectString, 10)
+                + _lp("Sam")
+            )
+            self.assertEqual(new_person.object_id, 9)
+            self.assertEqual(new_person.member("Name").value, "Sam")
+            self.assertEqual(doc.to_bytes(), source[:-1] + expected_insert + b"\x0b")
+
+    def test_new_instance_rejects_unknown_member_values(self) -> None:
+        source = _primitive_class_record(object_id=5, class_name="Game.Finances", member_name="Age", value=20) + b"\x0b"
+        self.temp_path.write_bytes(source)
+
+        with DNBFDocument.open(self.temp_path) as doc:
+            with self.assertRaises(MemberNotFoundError):
+                doc.find_class("Finances").new_instance({"Missing": 1})
+
 
 def _lp(value: str) -> bytes:
     encoded = value.encode("utf-8")
@@ -143,6 +208,20 @@ def _reference_class_record(
     result += struct.pack("<i", 2)
     result += struct.pack("<i", 2)
     result += struct.pack("<Bi", RecordTypeEnumeration.MemberReference, ref_id)
+    return bytes(result)
+
+
+def _string_class_record(*, object_id: int, class_name: str, member_name: str, value: str) -> bytes:
+    result = bytearray()
+    result += struct.pack("B", RecordTypeEnumeration.ClassWithMembersAndTypes)
+    result += struct.pack("<i", object_id)
+    result += _lp(class_name)
+    result += struct.pack("<i", 1)
+    result += _lp(member_name)
+    result += bytes([BinaryTypeEnumeration.String])
+    result += struct.pack("<i", 2)
+    result += struct.pack("<Bi", RecordTypeEnumeration.BinaryObjectString, 8)
+    result += _lp(value)
     return bytes(result)
 
 

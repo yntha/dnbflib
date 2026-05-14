@@ -7,7 +7,15 @@ from typing import Any, BinaryIO
 
 from dnbflib.decoded import decode_supported_record, encode_class_member_value
 from dnbflib.indexer import DNBFRecordStore, StoredRecord
-from dnbflib.records import RecordTypeEnumeration
+from dnbflib.records import (
+    BinaryObjectString,
+    ClassWithId,
+    MemberReference,
+    ObjectNull,
+    PrimitiveTypeEnumeration,
+    RecordTypeEnumeration,
+    encode_primitive_value,
+)
 from dnbflib.scanner import IndexedRecord, scan_records
 
 _UNDECODED = object()
@@ -55,6 +63,7 @@ class DNBFDocument:
         self._insertions_before_sequence: dict[int, list[bytes]] = {}
         self._pending_object_entries: list[dict[str, Any]] = []
         self._pending_raw_by_sequence: dict[int, bytes] = {}
+        self._reserved_object_ids: set[int] = set()
         self._load_graph()
 
     @classmethod
@@ -187,14 +196,23 @@ class DNBFDocument:
         self._dirty_sequences.add(record.sequence)
 
     def _next_object_id(self) -> int:
-        used_ids = set(self._objects_by_id)
+        used_ids = set(self._objects_by_id) | self._reserved_object_ids
         for entry in self._pending_object_entries:
             object_id = entry["record"].object_id
             if object_id is not None:
                 used_ids.add(int(object_id))
+        for entry in self._entries:
+            decoded = entry.get("decoded")
+            if decoded is not _UNDECODED:
+                _collect_decoded_object_ids(decoded, used_ids)
         if not used_ids:
             return 1
         return max(used_ids) + 1
+
+    def _allocate_object_id(self) -> int:
+        object_id = self._next_object_id()
+        self._reserved_object_ids.add(object_id)
+        return object_id
 
     def _message_end_sequence(self) -> int:
         for record in reversed(self._records):
@@ -226,10 +244,121 @@ class DNBFDocument:
         self._pending_object_entries.append(entry)
         self._pending_raw_by_sequence[sequence] = raw
         self._insertions_before_sequence.setdefault(insertion_sequence, []).append(raw)
+        self._reserved_object_ids.add(object_id)
 
         node = DNBFObjectNode(self, entry, object_id)
         self._objects_by_id[object_id] = node
         return node
+
+    def _create_instance_from_template(
+        self,
+        template: DNBFObjectNode,
+        values: dict[str, Any] | None = None,
+    ) -> DNBFObjectNode:
+        values = dict(values or {})
+        fields = template._fields
+        members = fields.get("members")
+        if not isinstance(members, list):
+            raise DNBFDocumentError(f"{template!r} does not expose decoded class members")
+
+        metadata_id = _template_metadata_id(template)
+        if metadata_id is None:
+            raise DNBFDocumentError(f"{template!r} cannot be used as an instance template")
+
+        _validate_member_values(template, members, values)
+        object_id = self._allocate_object_id()
+        member_bytes, decoded_members = self._encode_new_instance_members(members, values)
+
+        raw = ClassWithId(object_id=object_id, metadata_id=metadata_id, member_bytes=member_bytes).to_bytes()
+        decoded_fields: dict[str, Any] = {
+            "object_id": object_id,
+            "metadata_id": metadata_id,
+            "members": decoded_members,
+        }
+        class_name = template.class_name or _class_name_for_metadata(self, metadata_id)
+        if class_name is not None:
+            decoded_fields["class_name"] = class_name
+
+        return self._append_object_record(
+            record_type=RecordTypeEnumeration.ClassWithId,
+            raw=raw,
+            object_id=object_id,
+            decoded={
+                "editable": any(member.get("editable") for member in decoded_members),
+                "type": "ClassWithId",
+                "fields": decoded_fields,
+            },
+            metadata_id=metadata_id,
+        )
+
+    def _encode_new_instance_members(
+        self,
+        members: list[Any],
+        values: dict[str, Any],
+    ) -> tuple[bytes, list[dict[str, Any]]]:
+        payload = bytearray()
+        decoded_members: list[dict[str, Any]] = []
+        cursor = 9
+        for member in members:
+            if not isinstance(member, dict):
+                raise DNBFDocumentError("template contains an invalid member entry")
+            value_supplied, value = _pop_member_value(values, member.get("name", ""))
+            encoded, decoded_member = self._encode_new_instance_member(member, value_supplied, value)
+            decoded_member["value_offset"] = cursor
+            decoded_member["value_size"] = len(encoded)
+            payload += encoded
+            cursor += len(encoded)
+            decoded_members.append(decoded_member)
+        return bytes(payload), decoded_members
+
+    def _encode_new_instance_member(
+        self,
+        member: dict[str, Any],
+        value_supplied: bool,
+        value: Any,
+    ) -> tuple[bytes, dict[str, Any]]:
+        name = str(member.get("name", ""))
+        binary_type = str(member.get("binary_type", ""))
+        decoded_member: dict[str, Any] = {
+            "name": name,
+            "binary_type": binary_type,
+            "editable": True,
+        }
+
+        primitive_type_name = member.get("primitive_type")
+        if primitive_type_name is not None:
+            primitive_type = _primitive_type_from_field(primitive_type_name)
+            member_value = value if value_supplied else member.get("value")
+            encoded = encode_primitive_value(member_value, primitive_type)
+            decoded_member["primitive_type"] = primitive_type.name
+            decoded_member["value"] = member_value
+            return encoded, decoded_member
+
+        if not value_supplied:
+            value = _default_reference_value(member)
+
+        if value is None:
+            decoded_member["record_type"] = "ObjectNull"
+            return ObjectNull().to_bytes(), decoded_member
+
+        if isinstance(value, str) and binary_type == "String":
+            object_id = self._allocate_object_id()
+            decoded_member["record_type"] = "BinaryObjectString"
+            decoded_member["object_id"] = object_id
+            decoded_member["value"] = value
+            return BinaryObjectString(object_id, value).to_bytes(), decoded_member
+
+        ref_id = _reference_id_from_value(value)
+        if ref_id is not None:
+            decoded_member["record_type"] = "MemberReference"
+            decoded_member["ref_id"] = ref_id
+            return MemberReference(ref_id).to_bytes(), decoded_member
+
+        record_type = member.get("record_type")
+        raise DNBFDocumentError(
+            f"member {name!r} cannot be encoded for a new instance "
+            f"(binary_type={binary_type!r}, record_type={record_type!r})"
+        )
 
     def _entry_to_bytes(self, entry: dict[str, Any]) -> bytes:
         decoded = self._ensure_decoded(entry)
@@ -386,6 +515,12 @@ class DNBFObjectNode:
                 result[member.display_name] = member.value
         return result
 
+    def new_instance(self, values: dict[str, Any] | None = None, **kwargs: Any) -> DNBFObjectNode:
+        """Create a new instance using this object's class metadata as the template."""
+        merged_values = dict(values or {})
+        merged_values.update(kwargs)
+        return self.document._create_instance_from_template(self, merged_values)
+
     def __repr__(self) -> str:
         return f"<DNBFObjectNode object_id={self.object_id} class_name={self.class_name!r}>"
 
@@ -468,6 +603,90 @@ def _entry_object_id(record: IndexedRecord, decoded: dict[str, Any] | None) -> i
     if object_id is None:
         return None
     return int(object_id)
+
+
+def _collect_decoded_object_ids(decoded: Any, used_ids: set[int]) -> None:
+    if isinstance(decoded, dict):
+        for key, value in decoded.items():
+            if key == "object_id" and value is not None:
+                used_ids.add(int(value))
+            else:
+                _collect_decoded_object_ids(value, used_ids)
+    elif isinstance(decoded, list):
+        for item in decoded:
+            _collect_decoded_object_ids(item, used_ids)
+
+
+def _template_metadata_id(template: DNBFObjectNode) -> int | None:
+    fields = template._fields
+    metadata_id = fields.get("metadata_id")
+    if metadata_id is not None:
+        return int(metadata_id)
+
+    record_type = template.record.record_type
+    if record_type in {
+        RecordTypeEnumeration.ClassWithMembersAndTypes,
+        RecordTypeEnumeration.SystemClassWithMembersAndTypes,
+    }:
+        object_id = fields.get("object_id", template.object_id)
+        return int(object_id)
+    return None
+
+
+def _class_name_for_metadata(document: DNBFDocument, metadata_id: int) -> str | None:
+    metadata_node = document._objects_by_id.get(metadata_id)
+    if metadata_node is None:
+        return None
+    return metadata_node.class_name
+
+
+def _pop_member_value(values: dict[str, Any], name: Any) -> tuple[bool, Any]:
+    aliases = _member_name_aliases(str(name))
+    for key in list(values):
+        if str(key) in aliases or str(key).lower() in aliases:
+            return True, values.pop(key)
+    return False, None
+
+
+def _validate_member_values(template: DNBFObjectNode, members: list[Any], values: dict[str, Any]) -> None:
+    available: set[str] = set()
+    for member in members:
+        if isinstance(member, dict):
+            available.update(_member_name_aliases(str(member.get("name", ""))))
+
+    unknown = [str(key) for key in values if str(key) not in available and str(key).lower() not in available]
+    if unknown:
+        names = ", ".join(unknown)
+        raise MemberNotFoundError(f"{template!r} has no members matching: {names}")
+
+
+def _primitive_type_from_field(value: Any) -> PrimitiveTypeEnumeration:
+    if isinstance(value, PrimitiveTypeEnumeration):
+        return value
+    if isinstance(value, int):
+        return PrimitiveTypeEnumeration(value)
+    if isinstance(value, str):
+        try:
+            return PrimitiveTypeEnumeration[value]
+        except KeyError as exc:
+            raise DNBFDocumentError(f"unknown primitive type: {value!r}") from exc
+    raise DNBFDocumentError(f"invalid primitive type: {value!r}")
+
+
+def _default_reference_value(member: dict[str, Any]) -> Any:
+    if member.get("record_type") == "MemberReference":
+        return member.get("ref_id")
+    if member.get("record_type") == "BinaryObjectString":
+        return member.get("value")
+    return None
+
+
+def _reference_id_from_value(value: Any) -> int | None:
+    if isinstance(value, DNBFObjectNode):
+        return value.object_id
+    if isinstance(value, int) and not isinstance(value, bool):
+        return int(value)
+    return None
 
 
 def _member_name_aliases(name: str) -> set[str]:
