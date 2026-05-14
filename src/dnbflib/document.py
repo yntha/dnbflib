@@ -7,6 +7,7 @@ from typing import Any, BinaryIO
 
 from dnbflib.decoded import decode_supported_record, encode_class_member_value
 from dnbflib.indexer import DNBFRecordStore, StoredRecord
+from dnbflib.records import RecordTypeEnumeration
 from dnbflib.scanner import IndexedRecord, scan_records
 
 _UNDECODED = object()
@@ -51,6 +52,9 @@ class DNBFDocument:
         self._objects_by_id: dict[int, DNBFObjectNode] = {}
         self._dirty_sequences: set[int] = set()
         self._decode_context: dict[int, dict[str, Any]] = {}
+        self._insertions_before_sequence: dict[int, list[bytes]] = {}
+        self._pending_object_entries: list[dict[str, Any]] = []
+        self._pending_raw_by_sequence: dict[int, bytes] = {}
         self._load_graph()
 
     @classmethod
@@ -148,7 +152,11 @@ class DNBFDocument:
             for entry in self._entries
             if entry["record"].sequence in self._dirty_sequences
         }
-        return b"".join(replacements.get(record.sequence, self._record_raw(record)) for record in self._records)
+        chunks: list[bytes] = []
+        for record in self._records:
+            chunks.extend(self._insertions_before_sequence.get(record.sequence, []))
+            chunks.append(replacements.get(record.sequence, self._record_raw(record)))
+        return b"".join(chunks)
 
     def write(self, path: str | Path) -> None:
         """Write rebuilt bytes to ``path``."""
@@ -159,6 +167,8 @@ class DNBFDocument:
         }
         with Path(path).open("wb") as output:
             for record in self._records:
+                for inserted in self._insertions_before_sequence.get(record.sequence, []):
+                    output.write(inserted)
                 output.write(replacements.get(record.sequence, self._record_raw(record)))
 
     def _load_graph(self) -> None:
@@ -175,6 +185,51 @@ class DNBFDocument:
     def _mark_dirty(self, entry: dict[str, Any]) -> None:
         record: IndexedRecord = entry["record"]
         self._dirty_sequences.add(record.sequence)
+
+    def _next_object_id(self) -> int:
+        used_ids = set(self._objects_by_id)
+        for entry in self._pending_object_entries:
+            object_id = entry["record"].object_id
+            if object_id is not None:
+                used_ids.add(int(object_id))
+        if not used_ids:
+            return 1
+        return max(used_ids) + 1
+
+    def _message_end_sequence(self) -> int:
+        for record in reversed(self._records):
+            if record.record_type == RecordTypeEnumeration.MessageEnd:
+                return record.sequence
+        raise DNBFDocumentError("unable to insert records because the stream has no MessageEnd record")
+
+    def _append_object_record(
+        self,
+        *,
+        record_type: RecordTypeEnumeration,
+        raw: bytes,
+        object_id: int,
+        decoded: dict[str, Any] | None = None,
+        metadata_id: int | None = None,
+    ) -> DNBFObjectNode:
+        sequence = max(record.sequence for record in self._records) + len(self._pending_object_entries) + 1
+        insertion_sequence = self._message_end_sequence()
+        record = IndexedRecord(
+            sequence=sequence,
+            record_type=record_type,
+            offset=-1,
+            size=len(raw),
+            object_id=object_id,
+            metadata_id=metadata_id,
+        )
+        entry = {"record": record, "decoded": decoded}
+        self._entries.append(entry)
+        self._pending_object_entries.append(entry)
+        self._pending_raw_by_sequence[sequence] = raw
+        self._insertions_before_sequence.setdefault(insertion_sequence, []).append(raw)
+
+        node = DNBFObjectNode(self, entry, object_id)
+        self._objects_by_id[object_id] = node
+        return node
 
     def _entry_to_bytes(self, entry: dict[str, Any]) -> bytes:
         decoded = self._ensure_decoded(entry)
@@ -232,6 +287,11 @@ class DNBFDocument:
         return decoded
 
     def _record_raw(self, record: IndexedRecord) -> bytes:
+        if record.offset < 0:
+            try:
+                return self._pending_raw_by_sequence[record.sequence]
+            except KeyError as exc:
+                raise DNBFDocumentError(f"inserted record {record.sequence} has no raw bytes!!") from exc
         return self._source[record.offset:record.end_offset]
 
     def _decode_record_view(self, record: IndexedRecord) -> StoredRecord:

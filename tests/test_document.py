@@ -69,6 +69,39 @@ class DocumentTraversalTests(unittest.TestCase):
             selected = doc.one(class_name="Life", where=lambda node: node.member("Age").value == 40)
             self.assertEqual(selected.object_id, 2)
 
+    def test_document_allocates_object_ids_after_existing_and_pending_objects(self) -> None:
+        source = _primitive_class_record(object_id=5, class_name="Game.Finances", member_name="Age", value=20) + b"\x0b"
+        self.temp_path.write_bytes(source)
+
+        with DNBFDocument.open(self.temp_path) as doc:
+            self.assertEqual(doc._next_object_id(), 6)
+            doc._append_object_record(
+                record_type=RecordTypeEnumeration.ClassWithId,
+                raw=struct.pack("<Biii", RecordTypeEnumeration.ClassWithId, 6, 5, 30),
+                object_id=6,
+                metadata_id=5,
+                decoded={"type": "ClassWithId", "fields": {"object_id": 6, "metadata_id": 5, "members": []}},
+            )
+            self.assertEqual(doc._next_object_id(), 7)
+
+    def test_document_writes_inserted_object_records_before_message_end(self) -> None:
+        source = _primitive_class_record(object_id=5, class_name="Game.Finances", member_name="Age", value=20) + b"\x0b"
+        self.temp_path.write_bytes(source)
+        inserted = struct.pack("<Biii", RecordTypeEnumeration.ClassWithId, 6, 5, 30)
+
+        with DNBFDocument.open(self.temp_path) as doc:
+            node = doc._append_object_record(
+                record_type=RecordTypeEnumeration.ClassWithId,
+                raw=inserted,
+                object_id=6,
+                metadata_id=5,
+                decoded={"type": "ClassWithId", "fields": {"object_id": 6, "metadata_id": 5, "members": []}},
+            )
+
+            self.assertEqual(node.object_id, 6)
+            self.assertEqual(doc.object(6).object_id, 6)
+            self.assertEqual(doc.to_bytes(), source[:-1] + inserted + b"\x0b")
+
 
 def _lp(value: str) -> bytes:
     encoded = value.encode("utf-8")
