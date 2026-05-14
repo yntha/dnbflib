@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import struct
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import IntEnum
 from typing import Any, Protocol
@@ -212,3 +213,68 @@ class ClassWithId:
             + struct.pack("<i", int(self.metadata_id))
             + self.member_bytes
         )
+
+
+@dataclass(frozen=True)
+class ArraySinglePrimitive:
+    """Writable single-dimensional primitive array record."""
+
+    object_id: int
+    primitive_type: PrimitiveTypeEnumeration
+    values: Sequence[Any]
+    record_type: RecordTypeEnumeration = RecordTypeEnumeration.ArraySinglePrimitive
+
+    def to_bytes(self) -> bytes:
+        primitive_type = PrimitiveTypeEnumeration(self.primitive_type)
+        result = bytearray()
+        result += struct.pack("<BiiB", self.record_type.value, int(self.object_id), len(self.values), primitive_type)
+        for value in self.values:
+            result += encode_primitive_value(value, primitive_type)
+        return bytes(result)
+
+
+@dataclass(frozen=True)
+class ArraySingleObject:
+    """Writable single-dimensional object array record."""
+
+    object_id: int
+    items: Sequence[Record | bytes | bytearray]
+    record_type: RecordTypeEnumeration = RecordTypeEnumeration.ArraySingleObject
+
+    def to_bytes(self) -> bytes:
+        return _array_single_record_to_bytes(self.record_type, self.object_id, self.items)
+
+
+@dataclass(frozen=True)
+class ArraySingleString:
+    """Writable single-dimensional string array record."""
+
+    object_id: int
+    items: Sequence[Record | bytes | bytearray]
+    record_type: RecordTypeEnumeration = RecordTypeEnumeration.ArraySingleString
+
+    def to_bytes(self) -> bytes:
+        return _array_single_record_to_bytes(self.record_type, self.object_id, self.items)
+
+
+def _array_single_record_to_bytes(
+    record_type: RecordTypeEnumeration,
+    object_id: int,
+    items: Sequence[Record | bytes | bytearray],
+) -> bytes:
+    result = bytearray()
+    result += struct.pack("<Bii", record_type.value, int(object_id), len(items))
+    for item in items:
+        result += _record_item_to_bytes(item)
+    return bytes(result)
+
+
+def _record_item_to_bytes(item: Record | bytes | bytearray) -> bytes:
+    if isinstance(item, bytes):
+        return item
+    if isinstance(item, bytearray):
+        return bytes(item)
+    to_bytes = getattr(item, "to_bytes", None)
+    if callable(to_bytes):
+        return bytes(to_bytes())
+    raise TypeError(f"array item cannot be serialized: {item!r}")

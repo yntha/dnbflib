@@ -4,6 +4,10 @@ import struct
 import unittest
 
 from dnbflib.records import (
+    ArraySingleObject,
+    ArraySinglePrimitive,
+    ArraySingleString,
+    BinaryObjectString,
     ClassWithId,
     MemberReference,
     ObjectNull,
@@ -42,6 +46,47 @@ class RecordWriterTests(unittest.TestCase):
             struct.pack("<i", 1234),
         )
         self.assertEqual(encode_primitive_value("abc", PrimitiveTypeEnumeration.String), b"\x03abc")
+
+    def test_array_single_primitive_writes_header_and_values(self) -> None:
+        self.assertEqual(
+            ArraySinglePrimitive(55, PrimitiveTypeEnumeration.Int16, [1, 2, 3]).to_bytes(),
+            struct.pack(
+                "<BiiBhhh",
+                RecordTypeEnumeration.ArraySinglePrimitive,
+                55,
+                3,
+                PrimitiveTypeEnumeration.Int16,
+                1,
+                2,
+                3,
+            ),
+        )
+
+    def test_array_single_string_writes_record_items(self) -> None:
+        self.assertEqual(
+            ArraySingleString(
+                77,
+                [
+                    BinaryObjectString(10, "red"),
+                    MemberReference(11),
+                    ObjectNull(),
+                ],
+            ).to_bytes(),
+            (
+                struct.pack("<Bii", RecordTypeEnumeration.ArraySingleString, 77, 3)
+                + BinaryObjectString(10, "red").to_bytes()
+                + MemberReference(11).to_bytes()
+                + ObjectNull().to_bytes()
+            ),
+        )
+
+    def test_array_single_object_accepts_raw_record_items(self) -> None:
+        self.assertEqual(
+            ArraySingleObject(88, [MemberReference(20), b"\x0a"]).to_bytes(),
+            struct.pack("<Bii", RecordTypeEnumeration.ArraySingleObject, 88, 2)
+            + MemberReference(20).to_bytes()
+            + b"\x0a",
+        )
 
 
 if __name__ == "__main__":
