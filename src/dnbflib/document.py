@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import mmap
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any, BinaryIO
 
 from dnbflib.decoded import decode_supported_record, encode_class_member_value, encode_supported_record
 from dnbflib.indexer import DNBFRecordStore, StoredRecord
 from dnbflib.records import (
+    ArraySinglePrimitive,
     BinaryObjectString,
     ClassWithId,
     MemberReference,
@@ -241,6 +242,26 @@ class DNBFDocument:
         decoded: dict[str, Any] | None = None,
         metadata_id: int | None = None,
     ) -> DNBFObjectNode:
+        node = self._append_pending_record(
+            record_type=record_type,
+            raw=raw,
+            object_id=object_id,
+            decoded=decoded,
+            metadata_id=metadata_id,
+        )
+        if not isinstance(node, DNBFObjectNode):
+            raise DNBFDocumentError(f"expected an object record, got {record_type.name}")
+        return node
+
+    def _append_pending_record(
+        self,
+        *,
+        record_type: RecordTypeEnumeration,
+        raw: bytes,
+        object_id: int,
+        decoded: dict[str, Any] | None = None,
+        metadata_id: int | None = None,
+    ) -> DNBFObjectNode | DNBFArrayNode:
         sequence = max(record.sequence for record in self._records) + len(self._pending_object_entries) + 1
         insertion_sequence = self._message_end_sequence()
         record = IndexedRecord(
@@ -258,8 +279,68 @@ class DNBFDocument:
         self._insertions_before_sequence.setdefault(insertion_sequence, []).append(raw)
         self._reserved_object_ids.add(object_id)
 
-        node = DNBFObjectNode(self, entry, object_id)
+        node = self._node_for_entry(entry, object_id)
         self._objects_by_id[object_id] = node
+        return node
+
+    def new_primitive_array(
+        self,
+        values: Iterable[Any],
+        *,
+        item_type: PrimitiveTypeEnumeration | str | int,
+    ) -> DNBFArrayNode:
+        """Create a new one-dimensional primitive array."""
+        values = list(values)
+        primitive = _primitive_type_from_field(item_type)
+        object_id = self._allocate_object_id()
+        decoded = {
+            "editable": True,
+            "type": "ArraySinglePrimitive",
+            "fields": {
+                "object_id": object_id,
+                "primitive_type": primitive.name,
+                "values": values,
+            },
+        }
+        raw = ArraySinglePrimitive(object_id, primitive, values).to_bytes()
+        return self._append_array_record(RecordTypeEnumeration.ArraySinglePrimitive, raw, object_id, decoded)
+
+    def new_string_array(self, values: Iterable[str | None]) -> DNBFArrayNode:
+        """Create a new one-dimensional string array."""
+        return self._new_record_array(values, RecordTypeEnumeration.ArraySingleString)
+
+    def new_object_array(self, values: Iterable[Any]) -> DNBFArrayNode:
+        """Create a new one-dimensional object array."""
+        return self._new_record_array(values, RecordTypeEnumeration.ArraySingleObject)
+
+    def _new_record_array(
+        self,
+        values: Iterable[Any],
+        record_type: RecordTypeEnumeration,
+    ) -> DNBFArrayNode:
+        values = list(values)
+        object_id = self._allocate_object_id()
+        decoded = {
+            "editable": True,
+            "type": record_type.name,
+            "fields": {
+                "object_id": object_id,
+                "items": [_array_item_from_value(self, None, value) for value in values],
+            },
+        }
+        raw = encode_supported_record(decoded)
+        return self._append_array_record(record_type, raw, object_id, decoded)
+
+    def _append_array_record(
+        self,
+        record_type: RecordTypeEnumeration,
+        raw: bytes,
+        object_id: int,
+        decoded: dict[str, Any],
+    ) -> DNBFArrayNode:
+        node = self._append_pending_record(record_type=record_type, raw=raw, object_id=object_id, decoded=decoded)
+        if not isinstance(node, DNBFArrayNode):
+            raise DNBFDocumentError(f"expected an array record, got {record_type.name}")
         return node
 
     def _create_instance_from_template(
@@ -722,6 +803,38 @@ class DNBFMemberNode:
         if self.is_reference:
             return self.ref_id
         return self._member.get("value")
+
+    @property
+    def declared_type(self) -> str | None:
+        """Return the member's declared .NET type when the stream provides it."""
+        additional_info = self._member.get("additional_type_info")
+        if isinstance(additional_info, str):
+            return additional_info
+        if isinstance(additional_info, dict):
+            type_name = additional_info.get("type_name")
+            if isinstance(type_name, str):
+                return type_name
+        primitive_type = self._member.get("primitive_type")
+        if isinstance(primitive_type, str):
+            return primitive_type
+        return None
+
+    @property
+    def item_type(self) -> str | None:
+        """Return the declared item type for a one-dimensional array member."""
+        declared_type = self.declared_type
+        if declared_type is None:
+            return None
+        if declared_type.endswith("[]"):
+            return declared_type[:-2]
+        return None
+
+    def get_item_template(self) -> DNBFObjectNode:
+        """Find the only object whose class matches this array member's item type."""
+        item_type = self.item_type
+        if item_type is None:
+            raise ObjectNotFoundError(f"member {self.name!r} does not declare an array item type")
+        return self.owner.document.one(class_name=item_type)
 
     def matches(self, name: str) -> bool:
         wanted = _member_name_aliases(name)

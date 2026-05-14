@@ -805,6 +805,9 @@ def _decode_class_with_members_and_types(
             "binary_type": member["binary_type"].name,
             "editable": False,
         }
+        additional_info = member.get("additional_info")
+        if additional_info is not None:
+            entry["additional_type_info"] = _additional_type_info_to_manifest(additional_info)
         primitive_type = member.get("primitive_type")
         if primitive_type is not None:
             entry.update(
@@ -880,6 +883,9 @@ def _decode_class_with_id(
             "binary_type": member["binary_type"].name,
             "editable": False,
         }
+        additional_info = member.get("additional_info")
+        if additional_info is not None:
+            entry["additional_type_info"] = _additional_type_info_to_manifest(additional_info)
         primitive_type = member.get("primitive_type")
         if primitive_type is not None:
             entry.update(
@@ -1766,6 +1772,8 @@ def _parse_class_members(
             "binary_type": binary_type,
             "offset": cursor,
         }
+        if additional_info is not None:
+            member["additional_info"] = additional_info
         if remaining_nulls:
             member["null_from_run"] = True
             remaining_nulls -= 1

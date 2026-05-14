@@ -365,6 +365,145 @@ class DocumentTraversalTests(unittest.TestCase):
             with self.assertRaises(DNBFDocumentError):
                 array_node.resize(3, fill=0)
 
+    def test_document_creates_primitive_array(self) -> None:
+        self.temp_path.write_bytes(b"\x0b")
+
+        with DNBFDocument.open(self.temp_path) as doc:
+            array_node = doc.new_primitive_array([10, 20, 30], item_type=PrimitiveTypeEnumeration.Int32)
+
+            expected = _array_single_primitive_record(1, PrimitiveTypeEnumeration.Int32, [10, 20, 30]) + b"\x0b"
+            self.assertEqual(array_node.object_id, 1)
+            self.assertEqual(array_node.record_type, "ArraySinglePrimitive")
+            self.assertEqual(array_node.to_list(), [10, 20, 30])
+            self.assertEqual(doc.to_bytes(), expected)
+
+    def test_document_creates_string_array(self) -> None:
+        self.temp_path.write_bytes(b"\x0b")
+
+        with DNBFDocument.open(self.temp_path) as doc:
+            array_node = doc.new_string_array(["red", None, "blue"])
+
+            expected = (
+                struct.pack("<Bii", RecordTypeEnumeration.ArraySingleString, 1, 3)
+                + BinaryObjectString(2, "red").to_bytes()
+                + struct.pack("B", RecordTypeEnumeration.ObjectNull)
+                + BinaryObjectString(3, "blue").to_bytes()
+                + b"\x0b"
+            )
+            self.assertEqual(array_node.object_id, 1)
+            self.assertEqual(array_node.to_list(), ["red", None, "blue"])
+            self.assertEqual(doc.to_bytes(), expected)
+
+    def test_document_creates_object_array(self) -> None:
+        item = _primitive_class_record(object_id=5, class_name="Game.Item", member_name="Value", value=42)
+        self.temp_path.write_bytes(item + b"\x0b")
+
+        with DNBFDocument.open(self.temp_path) as doc:
+            array_node = doc.new_object_array([doc.object(5), None])
+
+            expected_array = (
+                struct.pack("<Bii", RecordTypeEnumeration.ArraySingleObject, 6, 2)
+                + struct.pack("<Bi", RecordTypeEnumeration.MemberReference, 5)
+                + struct.pack("B", RecordTypeEnumeration.ObjectNull)
+            )
+            self.assertEqual(array_node.object_id, 6)
+            self.assertEqual(array_node[0].object_id, 5)
+            self.assertIsNone(array_node[1])
+            self.assertEqual(doc.to_bytes(), item + expected_array + b"\x0b")
+
+    def test_document_assigns_new_array_to_reference_field(self) -> None:
+        old_scores = _array_single_primitive_record(9, PrimitiveTypeEnumeration.Int32, [1])
+        life = _reference_class_record(
+            object_id=1,
+            class_name="Game.Life",
+            member_name="<Scores>k__BackingField",
+            ref_type_name="System.Int32[]",
+            ref_id=9,
+        )
+        self.temp_path.write_bytes(old_scores + life + b"\x0b")
+
+        with DNBFDocument.open(self.temp_path) as doc:
+            life_node = doc.find_class("Life")
+            new_scores = doc.new_primitive_array([10, 20], item_type=PrimitiveTypeEnumeration.Int32)
+            life_node.member("Scores").set(new_scores)
+
+            expected_life = _reference_class_record(
+                object_id=1,
+                class_name="Game.Life",
+                member_name="<Scores>k__BackingField",
+                ref_type_name="System.Int32[]",
+                ref_id=10,
+            )
+            expected_scores = _array_single_primitive_record(10, PrimitiveTypeEnumeration.Int32, [10, 20])
+            self.assertEqual(doc.to_bytes(), old_scores + expected_life + expected_scores + b"\x0b")
+
+    def test_document_creates_empty_object_array(self) -> None:
+        self.temp_path.write_bytes(b"\x0b")
+
+        with DNBFDocument.open(self.temp_path) as doc:
+            array_node = doc.new_object_array([])
+            expected = struct.pack("<Bii", RecordTypeEnumeration.ArraySingleObject, 1, 0) + b"\x0b"
+            self.assertEqual(array_node.to_list(), [])
+            self.assertEqual(doc.to_bytes(), expected)
+
+    def test_document_rejects_unsupported_object_array_item(self) -> None:
+        self.temp_path.write_bytes(b"\x0b")
+
+        with DNBFDocument.open(self.temp_path) as doc:
+            with self.assertRaises(DNBFDocumentError):
+                doc.new_object_array([object()])
+
+    def test_reference_member_exposes_declared_item_type(self) -> None:
+        inventory = _array_single_object_record(object_id=9, items=[None])
+        life = _reference_class_record(
+            object_id=1,
+            class_name="Game.Life",
+            member_name="<Inventory>k__BackingField",
+            ref_type_name="Game.Item[]",
+            ref_id=9,
+        )
+        self.temp_path.write_bytes(inventory + life + b"\x0b")
+
+        with DNBFDocument.open(self.temp_path) as doc:
+            inventory_member = doc.find_class("Life").member("Inventory")
+
+            self.assertEqual(inventory_member.declared_type, "Game.Item[]")
+            self.assertEqual(inventory_member.item_type, "Game.Item")
+
+    def test_reference_member_gets_item_template(self) -> None:
+        item_template = _primitive_class_record(object_id=5, class_name="Game.Item", member_name="Value", value=42)
+        inventory = _array_single_object_record(object_id=9, items=[None])
+        life = _reference_class_record(
+            object_id=1,
+            class_name="Game.Life",
+            member_name="<Inventory>k__BackingField",
+            ref_type_name="Game.Item[]",
+            ref_id=9,
+        )
+        self.temp_path.write_bytes(item_template + inventory + life + b"\x0b")
+
+        with DNBFDocument.open(self.temp_path) as doc:
+            inventory_member = doc.find_class("Life").member("Inventory")
+            template = inventory_member.get_item_template()
+            new_item = template.new_instance({"Value": 99})
+            new_inventory = doc.new_object_array([new_item])
+            inventory_member.set(new_inventory)
+
+            expected_life = _reference_class_record(
+                object_id=1,
+                class_name="Game.Life",
+                member_name="<Inventory>k__BackingField",
+                ref_type_name="Game.Item[]",
+                ref_id=11,
+            )
+            expected_new_item = struct.pack("<Biii", RecordTypeEnumeration.ClassWithId, 10, 5, 99)
+            expected_inventory = (
+                struct.pack("<Bii", RecordTypeEnumeration.ArraySingleObject, 11, 1)
+                + struct.pack("<Bi", RecordTypeEnumeration.MemberReference, 10)
+            )
+            expected = item_template + inventory + expected_life + expected_new_item + expected_inventory + b"\x0b"
+            self.assertEqual(doc.to_bytes(), expected)
+
 
 def _lp(value: str) -> bytes:
     encoded = value.encode("utf-8")
@@ -432,6 +571,17 @@ def _array_single_primitive_record(
     result += struct.pack("<BiiB", RecordTypeEnumeration.ArraySinglePrimitive, object_id, len(values), primitive_type)
     for value in values:
         result += struct.pack("<i", value)
+    return bytes(result)
+
+
+def _array_single_object_record(object_id: int, items: list[object | None]) -> bytes:
+    result = bytearray()
+    result += struct.pack("<Bii", RecordTypeEnumeration.ArraySingleObject, object_id, len(items))
+    for item in items:
+        if item is None:
+            result += struct.pack("B", RecordTypeEnumeration.ObjectNull)
+        else:
+            raise ValueError("test helper only supports null object array items")
     return bytes(result)
 
 
