@@ -593,8 +593,57 @@ class DNBFArrayNode:
 
         raise DNBFDocumentError(f"{self!r} does not expose editable array items")
 
+    def __delitem__(self, index: int) -> None:
+        items = self._mutable_single_array_items()
+        del items[index]
+        self.document._mark_dirty(self._entry)
+
     def __iter__(self):
         return iter(self._items())
+
+    def append(self, value: Any) -> None:
+        """Append one value to a single-dimensional array."""
+        items = self._mutable_single_array_items()
+        if self._is_primitive_array_items(items):
+            items.append(value)
+        else:
+            items.append(_array_item_from_value(self.document, None, value))
+        self.document._mark_dirty(self._entry)
+
+    def insert(self, index: int, value: Any) -> None:
+        """Insert one value into a single-dimensional array."""
+        items = self._mutable_single_array_items()
+        if self._is_primitive_array_items(items):
+            items.insert(index, value)
+        else:
+            items.insert(index, _array_item_from_value(self.document, None, value))
+        self.document._mark_dirty(self._entry)
+
+    def resize(self, length: int, fill: Any = None) -> None:
+        """Resize a single-dimensional array, appending ``fill`` when growing."""
+        length = int(length)
+        if length < 0:
+            raise DNBFDocumentError("array length cannot be negative")
+
+        items = self._mutable_single_array_items()
+        current_length = len(items)
+        if length < current_length:
+            del items[length:]
+            self.document._mark_dirty(self._entry)
+            return
+
+        if length == current_length:
+            return
+
+        if self._is_primitive_array_items(items) and fill is None:
+            raise DNBFDocumentError("primitive arrays require an explicit fill value when growing")
+
+        for _ in range(length - current_length):
+            if self._is_primitive_array_items(items):
+                items.append(fill)
+            else:
+                items.append(_array_item_from_value(self.document, None, fill))
+        self.document._mark_dirty(self._entry)
 
     def items(self) -> list[Any]:
         """Return decoded array values with references followed where possible."""
@@ -615,6 +664,24 @@ class DNBFArrayNode:
             return [_array_item_value(self.document, item) for item in items]
 
         raise DNBFDocumentError(f"{self!r} does not expose decoded array items")
+
+    def _mutable_single_array_items(self) -> list[Any]:
+        if self.record.record_type == RecordTypeEnumeration.BinaryArray:
+            raise DNBFDocumentError("BinaryArray length mutation is not supported; use shape-aware APIs later")
+
+        fields = self._fields
+        values = fields.get("values")
+        if isinstance(values, list):
+            return values
+
+        items = fields.get("items")
+        if isinstance(items, list):
+            return items
+
+        raise DNBFDocumentError(f"{self!r} does not expose editable array items")
+
+    def _is_primitive_array_items(self, items: list[Any]) -> bool:
+        return self._fields.get("values") is items
 
     def __repr__(self) -> str:
         return f"<DNBFArrayNode object_id={self.object_id} record_type={self.record_type!r}>"

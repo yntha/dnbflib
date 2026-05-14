@@ -10,6 +10,7 @@ from dnbflib import (
     BinaryTypeEnumeration,
     DNBFArrayNode,
     DNBFDocument,
+    DNBFDocumentError,
     MemberNotFoundError,
     PrimitiveTypeEnumeration,
     RecordTypeEnumeration,
@@ -295,6 +296,75 @@ class DocumentTraversalTests(unittest.TestCase):
             )
             self.assertEqual(doc.to_bytes(), first_inventory + second_inventory + expected_life + b"\x0b")
 
+    def test_array_node_mutates_primitive_array_length(self) -> None:
+        inventory = _array_single_primitive_record(9, PrimitiveTypeEnumeration.Int32, [10, 20, 30])
+        self.temp_path.write_bytes(inventory + b"\x0b")
+
+        with DNBFDocument.open(self.temp_path) as doc:
+            inventory_node = doc.object(9)
+            inventory_node.append(40)
+            inventory_node.insert(1, 15)
+            del inventory_node[3]
+            inventory_node.resize(6, fill=0)
+            inventory_node.resize(4)
+
+            expected = _array_single_primitive_record(9, PrimitiveTypeEnumeration.Int32, [10, 15, 20, 40]) + b"\x0b"
+            self.assertEqual(inventory_node.to_list(), [10, 15, 20, 40])
+            self.assertEqual(doc.to_bytes(), expected)
+
+    def test_array_node_requires_fill_when_growing_primitive_array(self) -> None:
+        inventory = _array_single_primitive_record(9, PrimitiveTypeEnumeration.Int32, [10])
+        self.temp_path.write_bytes(inventory + b"\x0b")
+
+        with DNBFDocument.open(self.temp_path) as doc:
+            inventory_node = doc.object(9)
+            with self.assertRaises(DNBFDocumentError):
+                inventory_node.resize(2)
+
+    def test_array_node_mutates_record_array_length(self) -> None:
+        first_item = _primitive_class_record(object_id=5, class_name="Game.Item", member_name="Value", value=42)
+        second_item = _primitive_class_record(object_id=6, class_name="Game.Item", member_name="Value", value=84)
+        inventory = (
+            struct.pack("<Bii", RecordTypeEnumeration.ArraySingleObject, 9, 2)
+            + struct.pack("<Bi", RecordTypeEnumeration.MemberReference, 5)
+            + struct.pack("B", RecordTypeEnumeration.ObjectNull)
+        )
+        self.temp_path.write_bytes(first_item + second_item + inventory + b"\x0b")
+
+        with DNBFDocument.open(self.temp_path) as doc:
+            inventory_node = doc.object(9)
+            inventory_node.append("green")
+            inventory_node.insert(1, doc.object(6))
+            del inventory_node[2]
+            inventory_node.resize(5, fill=None)
+            inventory_node.resize(3)
+
+            expected_inventory = (
+                struct.pack("<Bii", RecordTypeEnumeration.ArraySingleObject, 9, 3)
+                + struct.pack("<Bi", RecordTypeEnumeration.MemberReference, 5)
+                + struct.pack("<Bi", RecordTypeEnumeration.MemberReference, 6)
+                + BinaryObjectString(10, "green").to_bytes()
+            )
+            self.assertEqual(inventory_node[0].object_id, 5)
+            self.assertEqual(inventory_node[1].object_id, 6)
+            self.assertEqual(inventory_node[2], "green")
+            self.assertEqual(doc.to_bytes(), first_item + second_item + expected_inventory + b"\x0b")
+
+    def test_binary_array_rejects_length_mutation(self) -> None:
+        binary_array = _binary_array_primitive_record(9, PrimitiveTypeEnumeration.Int32, [1, 2])
+        self.temp_path.write_bytes(binary_array + b"\x0b")
+
+        with DNBFDocument.open(self.temp_path) as doc:
+            array_node = doc.object(9)
+            with self.assertRaises(DNBFDocumentError):
+                array_node.append(3)
+            with self.assertRaises(DNBFDocumentError):
+                array_node.insert(0, 0)
+            with self.assertRaises(DNBFDocumentError):
+                del array_node[0]
+            with self.assertRaises(DNBFDocumentError):
+                array_node.resize(3, fill=0)
+
 
 def _lp(value: str) -> bytes:
     encoded = value.encode("utf-8")
@@ -360,6 +430,20 @@ def _array_single_primitive_record(
 ) -> bytes:
     result = bytearray()
     result += struct.pack("<BiiB", RecordTypeEnumeration.ArraySinglePrimitive, object_id, len(values), primitive_type)
+    for value in values:
+        result += struct.pack("<i", value)
+    return bytes(result)
+
+
+def _binary_array_primitive_record(
+    object_id: int,
+    primitive_type: PrimitiveTypeEnumeration,
+    values: list[int],
+) -> bytes:
+    result = bytearray()
+    result += struct.pack("<BiBi", RecordTypeEnumeration.BinaryArray, object_id, 0, 1)
+    result += struct.pack("<i", len(values))
+    result += struct.pack("BB", BinaryTypeEnumeration.Primitive, primitive_type)
     for value in values:
         result += struct.pack("<i", value)
     return bytes(result)
