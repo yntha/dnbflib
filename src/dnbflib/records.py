@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import struct
+from dataclasses import dataclass
 from enum import IntEnum
-from typing import Protocol
+from typing import Any, Protocol
 
 
 class RecordTypeEnumeration(IntEnum):
@@ -131,3 +132,83 @@ class BinaryObjectString:
 
     def __repr__(self) -> str:
         return f"BinaryObjectString(object_id={self.object_id}, value={self.value!r})"
+
+
+def encode_primitive_value(value: Any, primitive_type: PrimitiveTypeEnumeration) -> bytes:
+    """Encode a supported primitive value without a record header."""
+    if primitive_type == PrimitiveTypeEnumeration.Null:
+        return b""
+    if primitive_type in (PrimitiveTypeEnumeration.String, PrimitiveTypeEnumeration.Decimal):
+        return encode_length_prefixed_string(str(value))
+    if primitive_type in (PrimitiveTypeEnumeration.TimeSpan, PrimitiveTypeEnumeration.DateTime):
+        return struct.pack("<q", int(value))
+    if primitive_type not in PRIMITIVE_FORMATS:
+        raise ValueError(f"unsupported primitive type: {primitive_type.name}")
+
+    fmt, _ = PRIMITIVE_FORMATS[primitive_type]
+    return struct.pack(fmt, value)
+
+
+@dataclass(frozen=True)
+class MemberReference:
+    """Writable MemberReference record."""
+
+    ref_id: int
+    record_type: RecordTypeEnumeration = RecordTypeEnumeration.MemberReference
+
+    def to_bytes(self) -> bytes:
+        return struct.pack("<Bi", self.record_type.value, int(self.ref_id))
+
+
+@dataclass(frozen=True)
+class ObjectNull:
+    """Writable ObjectNull record."""
+
+    record_type: RecordTypeEnumeration = RecordTypeEnumeration.ObjectNull
+
+    def to_bytes(self) -> bytes:
+        return struct.pack("B", self.record_type.value)
+
+
+@dataclass(frozen=True)
+class ObjectNullMultiple256:
+    """Writable ObjectNullMultiple256 record."""
+
+    count: int
+    record_type: RecordTypeEnumeration = RecordTypeEnumeration.ObjectNullMultiple256
+
+    def to_bytes(self) -> bytes:
+        if not 0 <= int(self.count) <= 255:
+            raise ValueError("ObjectNullMultiple256 count must fit in one byte")
+        return struct.pack("BB", self.record_type.value, int(self.count))
+
+
+@dataclass(frozen=True)
+class ObjectNullMultiple:
+    """Writable ObjectNullMultiple record."""
+
+    count: int
+    record_type: RecordTypeEnumeration = RecordTypeEnumeration.ObjectNullMultiple
+
+    def to_bytes(self) -> bytes:
+        if not 0 <= int(self.count) <= 0x7FFFFFFF:
+            raise ValueError("ObjectNullMultiple count must fit in Int32")
+        return struct.pack("<Bi", self.record_type.value, int(self.count))
+
+
+@dataclass(frozen=True)
+class ClassWithId:
+    """Writable ClassWithId record for a new instance of existing class metadata."""
+
+    object_id: int
+    metadata_id: int
+    member_bytes: bytes
+    record_type: RecordTypeEnumeration = RecordTypeEnumeration.ClassWithId
+
+    def to_bytes(self) -> bytes:
+        return (
+            struct.pack("B", self.record_type.value)
+            + struct.pack("<i", int(self.object_id))
+            + struct.pack("<i", int(self.metadata_id))
+            + self.member_bytes
+        )
