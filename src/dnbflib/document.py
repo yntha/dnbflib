@@ -19,6 +19,12 @@ from dnbflib.records import (
 from dnbflib.scanner import IndexedRecord, scan_records
 
 _UNDECODED = object()
+_ARRAY_RECORD_TYPES = {
+    RecordTypeEnumeration.ArraySinglePrimitive,
+    RecordTypeEnumeration.ArraySingleObject,
+    RecordTypeEnumeration.ArraySingleString,
+    RecordTypeEnumeration.BinaryArray,
+}
 
 
 class DNBFDocumentError(Exception):
@@ -57,7 +63,7 @@ class DNBFDocument:
         self._source_map = source_map
         self._records = records
         self._entries: list[dict[str, Any]] = []
-        self._objects_by_id: dict[int, DNBFObjectNode] = {}
+        self._objects_by_id: dict[int, DNBFObjectNode | DNBFArrayNode] = {}
         self._dirty_sequences: set[int] = set()
         self._decode_context: dict[int, dict[str, Any]] = {}
         self._insertions_before_sequence: dict[int, list[bytes]] = {}
@@ -119,13 +125,13 @@ class DNBFDocument:
 
     def objects(self, class_name: str | None = None) -> list[DNBFObjectNode]:
         """Return object nodes, optionally filtered by class name."""
-        nodes = list(self._objects_by_id.values())
+        nodes = [node for node in self._objects_by_id.values() if isinstance(node, DNBFObjectNode)]
         if class_name is None:
             return nodes
         return [node for node in nodes if node.matches_class(class_name)]
 
-    def object(self, object_id: int) -> DNBFObjectNode:
-        """Return an object node by DNBF object id."""
+    def object(self, object_id: int) -> DNBFObjectNode | DNBFArrayNode:
+        """Return an object or array node by DNBF object id."""
         try:
             return self._objects_by_id[int(object_id)]
         except KeyError as exc:
@@ -189,7 +195,13 @@ class DNBFDocument:
             self._entries.append(entry)
 
             if record.object_id is not None:
-                self._objects_by_id[int(record.object_id)] = DNBFObjectNode(self, entry, int(record.object_id))
+                self._objects_by_id[int(record.object_id)] = self._node_for_entry(entry, int(record.object_id))
+
+    def _node_for_entry(self, entry: dict[str, Any], object_id: int) -> DNBFObjectNode | DNBFArrayNode:
+        record: IndexedRecord = entry["record"]
+        if record.record_type in _ARRAY_RECORD_TYPES:
+            return DNBFArrayNode(self, entry, object_id)
+        return DNBFObjectNode(self, entry, object_id)
 
     def _mark_dirty(self, entry: dict[str, Any]) -> None:
         record: IndexedRecord = entry["record"]
@@ -408,7 +420,7 @@ class DNBFDocument:
 
             object_id = _entry_object_id(candidate["record"], candidate["decoded"])
             if object_id is not None and object_id not in self._objects_by_id:
-                self._objects_by_id[object_id] = DNBFObjectNode(self, candidate, object_id)
+                self._objects_by_id[object_id] = self._node_for_entry(candidate, object_id)
 
         decoded = entry.get("decoded")
         if decoded is _UNDECODED:
@@ -525,6 +537,69 @@ class DNBFObjectNode:
         return f"<DNBFObjectNode object_id={self.object_id} class_name={self.class_name!r}>"
 
 
+class DNBFArrayNode:
+    """A decoded array instance in a ``DNBFDocument``."""
+
+    def __init__(self, document: DNBFDocument, entry: dict[str, Any], object_id: int) -> None:
+        self.document = document
+        self._entry = entry
+        self.object_id = object_id
+
+    @property
+    def record(self) -> IndexedRecord:
+        return self._entry["record"]
+
+    @property
+    def record_type(self) -> str:
+        return self.record.record_type.name
+
+    @property
+    def _decoded(self) -> dict[str, Any] | None:
+        return self.document._ensure_decoded(self._entry)
+
+    @property
+    def _fields(self) -> dict[str, Any]:
+        decoded = self._decoded
+        if not isinstance(decoded, dict):
+            return {}
+        fields = decoded.get("fields")
+        if not isinstance(fields, dict):
+            return {}
+        return fields
+
+    def __len__(self) -> int:
+        return len(self._items())
+
+    def __getitem__(self, index: int) -> Any:
+        return self._items()[index]
+
+    def __iter__(self):
+        return iter(self._items())
+
+    def items(self) -> list[Any]:
+        """Return decoded array values with references followed where possible."""
+        return self._items()
+
+    def to_list(self) -> list[Any]:
+        """Return decoded array values with references followed where possible."""
+        return self._items()
+
+    def _items(self) -> list[Any]:
+        fields = self._fields
+        values = fields.get("values")
+        if isinstance(values, list):
+            return list(values)
+
+        items = fields.get("items")
+        if isinstance(items, list):
+            return [_array_item_value(self.document, item) for item in items]
+
+        raise DNBFDocumentError(f"{self!r} does not expose decoded array items")
+
+    def __repr__(self) -> str:
+        return f"<DNBFArrayNode object_id={self.object_id} record_type={self.record_type!r}>"
+
+
 class DNBFMemberNode:
     """A decoded member on a ``DNBFObjectNode``."""
 
@@ -566,8 +641,8 @@ class DNBFMemberNode:
         available = _member_name_aliases(self.name)
         return not wanted.isdisjoint(available)
 
-    def deref(self) -> DNBFObjectNode:
-        """Follow a ``MemberReference`` and return the referenced object node."""
+    def deref(self) -> DNBFObjectNode | DNBFArrayNode:
+        """Follow a ``MemberReference`` and return the referenced object or array node."""
         if self.ref_id is None:
             raise ObjectNotFoundError(f"member {self.name!r} is not a reference")
         return self.owner.document.object(self.ref_id)
@@ -682,11 +757,25 @@ def _default_reference_value(member: dict[str, Any]) -> Any:
 
 
 def _reference_id_from_value(value: Any) -> int | None:
-    if isinstance(value, DNBFObjectNode):
+    if isinstance(value, (DNBFObjectNode, DNBFArrayNode)):
         return value.object_id
     if isinstance(value, int) and not isinstance(value, bool):
         return int(value)
     return None
+
+
+def _array_item_value(document: DNBFDocument, item: Any) -> Any:
+    if not isinstance(item, dict):
+        return item
+
+    record_type = item.get("record_type")
+    if record_type == "MemberReference" and item.get("ref_id") is not None:
+        return document.object(int(item["ref_id"]))
+    if record_type == "BinaryObjectString":
+        return item.get("value")
+    if record_type == "ObjectNull":
+        return None
+    return item
 
 
 def _member_name_aliases(name: str) -> set[str]:

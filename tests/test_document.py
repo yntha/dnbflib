@@ -6,7 +6,9 @@ from pathlib import Path
 
 from dnbflib import (
     AmbiguousObjectError,
+    BinaryObjectString,
     BinaryTypeEnumeration,
+    DNBFArrayNode,
     DNBFDocument,
     MemberNotFoundError,
     PrimitiveTypeEnumeration,
@@ -167,6 +169,53 @@ class DocumentTraversalTests(unittest.TestCase):
             with self.assertRaises(MemberNotFoundError):
                 doc.find_class("Finances").new_instance({"Missing": 1})
 
+    def test_member_reference_can_deref_array_node(self) -> None:
+        inventory = _array_single_primitive_record(9, PrimitiveTypeEnumeration.Int32, [10, 20, 30])
+        life = _reference_class_record(
+            object_id=1,
+            class_name="Game.Life",
+            member_name="<Inventory>k__BackingField",
+            ref_type_name="System.Int32[]",
+            ref_id=9,
+        )
+        self.temp_path.write_bytes(inventory + life + b"\x0b")
+
+        with DNBFDocument.open(self.temp_path) as doc:
+            inventory_node = doc.find_class("Life").member("Inventory").deref()
+
+            self.assertIsInstance(inventory_node, DNBFArrayNode)
+            self.assertEqual(inventory_node.object_id, 9)
+            self.assertEqual(inventory_node.record_type, "ArraySinglePrimitive")
+            self.assertEqual(len(inventory_node), 3)
+            self.assertEqual(inventory_node[1], 20)
+            self.assertEqual(inventory_node.to_list(), [10, 20, 30])
+            self.assertEqual([node.object_id for node in doc.objects()], [1])
+
+    def test_array_node_items_decode_strings_references_and_nulls(self) -> None:
+        item = _primitive_class_record(object_id=5, class_name="Game.Item", member_name="Value", value=42)
+        inventory = (
+            struct.pack("<Bii", RecordTypeEnumeration.ArraySingleString, 9, 3)
+            + BinaryObjectString(10, "red").to_bytes()
+            + struct.pack("<Bi", RecordTypeEnumeration.MemberReference, 5)
+            + struct.pack("B", RecordTypeEnumeration.ObjectNull)
+        )
+        life = _reference_class_record(
+            object_id=1,
+            class_name="Game.Life",
+            member_name="<Inventory>k__BackingField",
+            ref_type_name="System.String[]",
+            ref_id=9,
+        )
+        self.temp_path.write_bytes(item + inventory + life + b"\x0b")
+
+        with DNBFDocument.open(self.temp_path) as doc:
+            inventory_node = doc.find_class("Life").member("Inventory").deref()
+            items = inventory_node.to_list()
+
+            self.assertEqual(items[0], "red")
+            self.assertEqual(items[1].object_id, 5)
+            self.assertIsNone(items[2])
+
 
 def _lp(value: str) -> bytes:
     encoded = value.encode("utf-8")
@@ -222,6 +271,18 @@ def _string_class_record(*, object_id: int, class_name: str, member_name: str, v
     result += struct.pack("<i", 2)
     result += struct.pack("<Bi", RecordTypeEnumeration.BinaryObjectString, 8)
     result += _lp(value)
+    return bytes(result)
+
+
+def _array_single_primitive_record(
+    object_id: int,
+    primitive_type: PrimitiveTypeEnumeration,
+    values: list[int],
+) -> bytes:
+    result = bytearray()
+    result += struct.pack("<BiiB", RecordTypeEnumeration.ArraySinglePrimitive, object_id, len(values), primitive_type)
+    for value in values:
+        result += struct.pack("<i", value)
     return bytes(result)
 
 

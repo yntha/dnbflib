@@ -3,6 +3,7 @@ __all__ = [
     "AmbiguousObjectError",
     "BinaryObjectString",
     "BinaryTypeEnumeration",
+    "DNBFArrayNode",
     "DNBFDocument",
     "DNBFDocumentError",
     "DNBFMemberNode",
@@ -58,6 +59,7 @@ def __getattr__(name: str):
     if name in {
         "DNBFDocument",
         "DNBFDocumentError",
+        "DNBFArrayNode",
         "DNBFMemberNode",
         "DNBFObjectNode",
         "ObjectNotFoundError",
@@ -68,6 +70,7 @@ def __getattr__(name: str):
         from dnbflib.document import (  # noqa: PLC0415
             AmbiguousMemberError,
             AmbiguousObjectError,
+            DNBFArrayNode,
             DNBFDocument,
             DNBFDocumentError,
             DNBFMemberNode,
@@ -79,6 +82,7 @@ def __getattr__(name: str):
         return {
             "DNBFDocument": DNBFDocument,
             "DNBFDocumentError": DNBFDocumentError,
+            "DNBFArrayNode": DNBFArrayNode,
             "DNBFMemberNode": DNBFMemberNode,
             "DNBFObjectNode": DNBFObjectNode,
             "ObjectNotFoundError": ObjectNotFoundError,
