@@ -22,7 +22,7 @@ BinaryFormatter payloads from users or the network.
 ## Requirements
 
 - Python 3.11 or newer.
-- `pydatastreams`, installed automatically by package managers.
+- `pydatastreams`
 
 ## Installation
 
