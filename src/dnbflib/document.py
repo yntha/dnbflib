@@ -935,11 +935,24 @@ class DNBFMemberNode:
         available = _member_name_aliases(self.name)
         return not wanted.isdisjoint(available)
 
-    def deref(self) -> DNBFObjectNode | DNBFArrayNode:
-        """Follow a ``MemberReference`` and return the referenced object or array node."""
+    def _referenced_node(self) -> DNBFObjectNode | DNBFArrayNode:
         if self.ref_id is None:
             raise ObjectNotFoundError(f"member {self.name!r} is not a reference")
         return self.owner.document.object(self.ref_id)
+
+    def deref_object(self) -> DNBFObjectNode:
+        """Follow a ``MemberReference`` and return the referenced object node."""
+        node = self._referenced_node()
+        if not isinstance(node, DNBFObjectNode):
+            raise ObjectNotFoundError(f"member {self.name!r} references an array, not an object")
+        return node
+
+    def deref_array(self) -> DNBFArrayNode:
+        """Follow a ``MemberReference`` and return the referenced array node."""
+        node = self._referenced_node()
+        if not isinstance(node, DNBFArrayNode):
+            raise ObjectNotFoundError(f"member {self.name!r} references an object, not an array")
+        return node
 
     def set(self, value: Any) -> None:
         """Set this member's decoded value and mark the owning record dirty."""

@@ -552,8 +552,8 @@ python -c "from dnbflib import DNBFRecordStore; print(DNBFRecordStore)"</code></
           <h4>Object IDs and References</h4>
           <p>
             BinaryFormatter often gives objects numeric IDs. A field may not contain the object directly;
-            it may contain a reference to an ID instead. When you call <code>member.deref()</code>,
-            dnbflib follows that reference and gives you the target object.
+            it may contain a reference to an ID instead. Use <code>member.deref_object()</code> when the
+            field points to an object, or <code>member.deref_array()</code> when it points to an array.
           </p>
 
           <h4>Raw Bytes</h4>
@@ -687,7 +687,7 @@ output_path = Path("edited.bin")
 
 with DNBFDocument.open(input_path) as doc:
     life = doc.one(class_name="Life", where=lambda obj: obj.member("Name").value == "Alex")
-    finances = life.member("Finances").deref()
+    finances = life.member("Finances").deref_object()
     finances.member("BankBalance").set(123456)
     doc.write(output_path)</code></pre>
 
@@ -776,7 +776,7 @@ with DNBFDocument.open(input_path) as doc:
 
 with DNBFDocument.open("save.dat") as doc:
     life = doc.one(class_name="Life", where=lambda obj: obj.member("Name").value == "Alex")
-    old_finances = life.member("Finances").deref()
+    old_finances = life.member("Finances").deref_object()
 
     new_finances = old_finances.new_instance({
         "BankBalance": 999999,
@@ -807,7 +807,7 @@ with DNBFDocument.open("save.dat") as doc:
 
           <pre><code>with DNBFDocument.open("save.dat") as doc:
     life = doc.find_class("Life")
-    inventory = life.member("Inventory").deref()
+    inventory = life.member("Inventory").deref_array()
 
     inventory[0] = None
     inventory.append("loose note")
@@ -951,7 +951,7 @@ with DNBFDocument.open("save.dat") as doc:
 
 with DNBFDocument.open("save.dat") as doc:
     life = doc.one(class_name="Life", where=lambda obj: obj.member("Name").value == "Alex")
-    finances = life.member("Finances").deref()
+    finances = life.member("Finances").deref_object()
     finances.member("BankBalance").set(123456)
     doc.write("edited.dat")</code></pre>
           <table>
@@ -979,8 +979,12 @@ with DNBFDocument.open("save.dat") as doc:
                 <td>Find a field/member on an object. Backing-field names are simplified when possible.</td>
               </tr>
               <tr>
-                <td><code>member.deref()</code></td>
-                <td>Follow a reference field to the object or array it points at.</td>
+                <td><code>member.deref_object()</code></td>
+                <td>Follow a reference field to the object it points at.</td>
+              </tr>
+              <tr>
+                <td><code>member.deref_array()</code></td>
+                <td>Follow a reference field to the array it points at.</td>
               </tr>
               <tr>
                 <td><code>member.set(value)</code></td>

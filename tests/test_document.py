@@ -47,7 +47,7 @@ class DocumentTraversalTests(unittest.TestCase):
 
         with DNBFDocument.open(self.temp_path) as doc:
             life_node = doc.find_class("Life")
-            finances_node = life_node.member("Finances").deref()
+            finances_node = life_node.member("Finances").deref_object()
             finances_node.member("BankBalance").set(123456)
 
             expected = (
@@ -126,7 +126,7 @@ class DocumentTraversalTests(unittest.TestCase):
 
         with DNBFDocument.open(self.temp_path) as doc:
             life_node = doc.find_class("Life")
-            new_finances = life_node.member("Finances").deref().new_instance({"BankBalance": 999999})
+            new_finances = life_node.member("Finances").deref_object().new_instance({"BankBalance": 999999})
             life_node.member("Finances").set(new_finances)
 
             expected = (
@@ -183,7 +183,7 @@ class DocumentTraversalTests(unittest.TestCase):
         self.temp_path.write_bytes(inventory + life + b"\x0b")
 
         with DNBFDocument.open(self.temp_path) as doc:
-            inventory_node = doc.find_class("Life").member("Inventory").deref()
+            inventory_node = doc.find_class("Life").member("Inventory").deref_array()
 
             self.assertIsInstance(inventory_node, DNBFArrayNode)
             self.assertEqual(inventory_node.object_id, 9)
@@ -231,6 +231,24 @@ class DocumentTraversalTests(unittest.TestCase):
             self.assertEqual(item_node.member("Value").value, 42)
             self.assertEqual([record.object_id for record in doc._records], [9, 5])
 
+    def test_member_reference_requires_matching_deref_kind(self) -> None:
+        inventory = _array_single_primitive_record(9, PrimitiveTypeEnumeration.Int32, [10, 20, 30])
+        life = _reference_class_record(
+            object_id=1,
+            class_name="Game.Life",
+            member_name="<Inventory>k__BackingField",
+            ref_type_name="System.Int32[]",
+            ref_id=9,
+        )
+        self.temp_path.write_bytes(inventory + life + b"\x0b")
+
+        with DNBFDocument.open(self.temp_path) as doc:
+            inventory_member = doc.find_class("Life").member("Inventory")
+
+            self.assertEqual(inventory_member.deref_array().object_id, 9)
+            with self.assertRaises(ObjectNotFoundError):
+                inventory_member.deref_object()
+
     def test_get_first_returns_first_matching_object_without_full_scan(self) -> None:
         first_life = _primitive_class_record(object_id=1, class_name="Game.Life", member_name="Age", value=20)
         second_life = _primitive_class_record(object_id=2, class_name="Game.Life", member_name="Age", value=40)
@@ -270,7 +288,7 @@ class DocumentTraversalTests(unittest.TestCase):
         self.temp_path.write_bytes(item + inventory + life + b"\x0b")
 
         with DNBFDocument.open(self.temp_path) as doc:
-            inventory_node = doc.find_class("Life").member("Inventory").deref()
+            inventory_node = doc.find_class("Life").member("Inventory").deref_array()
             items = inventory_node.to_list()
 
             self.assertEqual(items[0], "red")
@@ -289,7 +307,7 @@ class DocumentTraversalTests(unittest.TestCase):
         self.temp_path.write_bytes(inventory + life + b"\x0b")
 
         with DNBFDocument.open(self.temp_path) as doc:
-            inventory_node = doc.find_class("Life").member("Inventory").deref()
+            inventory_node = doc.find_class("Life").member("Inventory").deref_array()
             inventory_node[1] = 99
 
             expected = _array_single_primitive_record(9, PrimitiveTypeEnumeration.Int32, [10, 99, 30]) + life + b"\x0b"
@@ -315,7 +333,7 @@ class DocumentTraversalTests(unittest.TestCase):
         self.temp_path.write_bytes(first_item + second_item + inventory + life + b"\x0b")
 
         with DNBFDocument.open(self.temp_path) as doc:
-            inventory_node = doc.find_class("Life").member("Inventory").deref()
+            inventory_node = doc.find_class("Life").member("Inventory").deref_array()
             inventory_node[0] = "blue"
             inventory_node[1] = doc.object(6)
             inventory_node[2] = "green"
