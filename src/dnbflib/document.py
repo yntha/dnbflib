@@ -17,7 +17,7 @@ from dnbflib.records import (
     RecordTypeEnumeration,
     encode_primitive_value,
 )
-from dnbflib.scanner import IndexedRecord, scan_records
+from dnbflib.scanner import IncrementalRecordScanner, IndexedRecord, scan_records
 
 _UNDECODED = object()
 _ARRAY_RECORD_TYPES = {
@@ -58,11 +58,13 @@ class DNBFDocument:
         *,
         source_file: BinaryIO | None = None,
         source_map: mmap.mmap | None = None,
+        lazy_scanner: IncrementalRecordScanner | None = None,
     ) -> None:
         self._source = source
         self._source_file = source_file
         self._source_map = source_map
         self._records = records
+        self._lazy_scanner = lazy_scanner
         self._entries: list[dict[str, Any]] = []
         self._objects_by_id: dict[int, DNBFObjectNode | DNBFArrayNode] = {}
         self._dirty_sequences: set[int] = set()
@@ -85,6 +87,29 @@ class DNBFDocument:
 
         try:
             return cls(source_map, scan_records(source_map), source_file=source_file, source_map=source_map)
+        except Exception:
+            source_map.close()
+            source_file.close()
+            raise
+
+    @classmethod
+    def open_lazy(cls, path: str | Path) -> DNBFDocument:
+        """Open a DNBF stream and scan records only when lookups need them."""
+        source_file = Path(path).open("rb")
+        try:
+            source_map = mmap.mmap(source_file.fileno(), 0, access=mmap.ACCESS_READ)
+        except Exception:
+            source_file.close()
+            raise
+
+        try:
+            return cls(
+                source_map,
+                [],
+                source_file=source_file,
+                source_map=source_map,
+                lazy_scanner=IncrementalRecordScanner(source_map),
+            )
         except Exception:
             source_map.close()
             source_file.close()
@@ -126,6 +151,7 @@ class DNBFDocument:
 
     def objects(self, class_name: str | None = None) -> list[DNBFObjectNode]:
         """Return object nodes, optionally filtered by class name."""
+        self._scan_to_end()
         nodes = [node for node in self._objects_by_id.values() if isinstance(node, DNBFObjectNode)]
         if class_name is None:
             return nodes
@@ -133,14 +159,33 @@ class DNBFDocument:
 
     def object(self, object_id: int) -> DNBFObjectNode | DNBFArrayNode:
         """Return an object or array node by DNBF object id."""
+        wanted_id = int(object_id)
+        self._scan_until(lambda record: record.object_id == wanted_id)
         try:
-            return self._objects_by_id[int(object_id)]
+            return self._objects_by_id[wanted_id]
         except KeyError as exc:
             raise ObjectNotFoundError(f"object_id {object_id} was not found") from exc
 
     def find_class(self, class_name: str) -> DNBFObjectNode:
         """Return the only object matching ``class_name``; raise if ambiguous."""
         return self.one(class_name=class_name)
+
+    def get_first(
+        self,
+        *,
+        class_name: str | None = None,
+        where: Callable[[DNBFObjectNode], bool] | None = None,
+    ) -> DNBFObjectNode:
+        """Return the first object matching the filters, scanning lazily when possible."""
+        for node in self._iter_object_nodes():
+            if class_name is not None and not node.matches_class(class_name):
+                continue
+            if where is not None and not where(node):
+                continue
+            return node
+
+        description = class_name or "object"
+        raise ObjectNotFoundError(f"no {description!r} object matched")
 
     def one(
         self,
@@ -163,6 +208,7 @@ class DNBFDocument:
 
     def to_bytes(self) -> bytes:
         """Rebuild the current stream bytes, including in-memory object edits."""
+        self._scan_to_end()
         replacements = {
             entry["record"].sequence: self._entry_to_bytes(entry)
             for entry in self._entries
@@ -176,6 +222,7 @@ class DNBFDocument:
 
     def write(self, path: str | Path) -> None:
         """Write rebuilt bytes to ``path``."""
+        self._scan_to_end()
         replacements = {
             entry["record"].sequence: self._entry_to_bytes(entry)
             for entry in self._entries
@@ -189,14 +236,59 @@ class DNBFDocument:
 
     def _load_graph(self) -> None:
         for record in self._records:
-            entry = {
-                "record": record,
-                "decoded": _UNDECODED,
-            }
-            self._entries.append(entry)
+            self._append_record_entry(record)
 
-            if record.object_id is not None:
-                self._objects_by_id[int(record.object_id)] = self._node_for_entry(entry, int(record.object_id))
+    def _append_record_entry(self, record: IndexedRecord) -> dict[str, Any]:
+        entry = {
+            "record": record,
+            "decoded": _UNDECODED,
+        }
+        self._entries.append(entry)
+
+        if record.object_id is not None:
+            self._objects_by_id[int(record.object_id)] = self._node_for_entry(entry, int(record.object_id))
+        return entry
+
+    def _scan_next_record(self) -> IndexedRecord | None:
+        if self._lazy_scanner is None:
+            return None
+        record = self._lazy_scanner.scan_next()
+        if record is None:
+            return None
+        self._records.append(record)
+        self._append_record_entry(record)
+        if self._lazy_scanner.complete:
+            self._lazy_scanner = None
+        return record
+
+    def _scan_until(self, predicate: Callable[[IndexedRecord], bool]) -> None:
+        while self._lazy_scanner is not None:
+            record = self._scan_next_record()
+            if record is not None and predicate(record):
+                return
+
+    def _scan_to_end(self) -> None:
+        while self._lazy_scanner is not None:
+            self._scan_next_record()
+
+    def _iter_object_nodes(self):
+        seen_ids: set[int] = set()
+        index = 0
+        while True:
+            while index < len(self._records):
+                record = self._records[index]
+                index += 1
+                object_id = record.object_id
+                if object_id is None or int(object_id) in seen_ids:
+                    continue
+                node = self._objects_by_id.get(int(object_id))
+                if isinstance(node, DNBFObjectNode):
+                    seen_ids.add(int(object_id))
+                    yield node
+
+            if self._lazy_scanner is None:
+                return
+            self._scan_next_record()
 
     def _node_for_entry(self, entry: dict[str, Any], object_id: int) -> DNBFObjectNode | DNBFArrayNode:
         record: IndexedRecord = entry["record"]
@@ -209,6 +301,7 @@ class DNBFDocument:
         self._dirty_sequences.add(record.sequence)
 
     def _next_object_id(self) -> int:
+        self._scan_to_end()
         used_ids = set(self._objects_by_id) | self._reserved_object_ids
         for entry in self._pending_object_entries:
             object_id = entry["record"].object_id
@@ -228,6 +321,7 @@ class DNBFDocument:
         return object_id
 
     def _message_end_sequence(self) -> int:
+        self._scan_to_end()
         for record in reversed(self._records):
             if record.record_type == RecordTypeEnumeration.MessageEnd:
                 return record.sequence

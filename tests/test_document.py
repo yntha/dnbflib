@@ -12,6 +12,7 @@ from dnbflib import (
     DNBFDocument,
     DNBFDocumentError,
     MemberNotFoundError,
+    ObjectNotFoundError,
     PrimitiveTypeEnumeration,
     RecordTypeEnumeration,
 )
@@ -191,6 +192,65 @@ class DocumentTraversalTests(unittest.TestCase):
             self.assertEqual(inventory_node[1], 20)
             self.assertEqual(inventory_node.to_list(), [10, 20, 30])
             self.assertEqual([node.object_id for node in doc.objects()], [1])
+
+    def test_open_lazy_scans_only_until_requested_object(self) -> None:
+        inventory = _array_single_primitive_record(9, PrimitiveTypeEnumeration.Int32, [10, 20, 30])
+        life = _reference_class_record(
+            object_id=1,
+            class_name="Game.Life",
+            member_name="<Inventory>k__BackingField",
+            ref_type_name="System.Int32[]",
+            ref_id=9,
+        )
+        self.temp_path.write_bytes(inventory + life + b"\x0b")
+
+        with DNBFDocument.open_lazy(self.temp_path) as doc:
+            self.assertEqual(doc._records, [])
+
+            inventory_node = doc.object(9)
+
+            self.assertIsInstance(inventory_node, DNBFArrayNode)
+            self.assertEqual([record.object_id for record in doc._records], [9])
+            self.assertEqual(inventory_node.to_list(), [10, 20, 30])
+
+    def test_open_lazy_scans_forward_when_reference_is_needed(self) -> None:
+        inventory = (
+            struct.pack("<Bii", RecordTypeEnumeration.ArraySingleObject, 9, 1)
+            + struct.pack("<Bi", RecordTypeEnumeration.MemberReference, 5)
+        )
+        item = _primitive_class_record(object_id=5, class_name="Game.Item", member_name="Value", value=42)
+        self.temp_path.write_bytes(inventory + item + b"\x0b")
+
+        with DNBFDocument.open_lazy(self.temp_path) as doc:
+            inventory_node = doc.object(9)
+            self.assertEqual([record.object_id for record in doc._records], [9])
+
+            item_node = inventory_node[0]
+
+            self.assertEqual(item_node.object_id, 5)
+            self.assertEqual(item_node.member("Value").value, 42)
+            self.assertEqual([record.object_id for record in doc._records], [9, 5])
+
+    def test_get_first_returns_first_matching_object_without_full_scan(self) -> None:
+        first_life = _primitive_class_record(object_id=1, class_name="Game.Life", member_name="Age", value=20)
+        second_life = _primitive_class_record(object_id=2, class_name="Game.Life", member_name="Age", value=40)
+        item = _primitive_class_record(object_id=3, class_name="Game.Item", member_name="Value", value=99)
+        self.temp_path.write_bytes(first_life + second_life + item + b"\x0b")
+
+        with DNBFDocument.open_lazy(self.temp_path) as doc:
+            life = doc.get_first(class_name="Life")
+
+            self.assertEqual(life.object_id, 1)
+            self.assertEqual(life.member("Age").value, 20)
+            self.assertEqual([record.object_id for record in doc._records], [1])
+
+    def test_get_first_raises_when_no_object_matches(self) -> None:
+        item = _primitive_class_record(object_id=3, class_name="Game.Item", member_name="Value", value=99)
+        self.temp_path.write_bytes(item + b"\x0b")
+
+        with DNBFDocument.open_lazy(self.temp_path) as doc:
+            with self.assertRaises(ObjectNotFoundError):
+                doc.get_first(class_name="Life")
 
     def test_array_node_items_decode_strings_references_and_nulls(self) -> None:
         item = _primitive_class_record(object_id=5, class_name="Game.Item", member_name="Value", value=42)
