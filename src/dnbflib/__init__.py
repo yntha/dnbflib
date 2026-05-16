@@ -1,3 +1,5 @@
+from typing import TYPE_CHECKING
+
 __all__ = [
     "AmbiguousMemberError",
     "AmbiguousObjectError",
@@ -19,6 +21,29 @@ __all__ = [
     "export_record_store_to_yaml",
     "rebuild_yaml_export",
 ]
+
+
+if TYPE_CHECKING:
+    from dnbflib.document import (
+        AmbiguousMemberError,
+        AmbiguousObjectError,
+        DNBFArrayNode,
+        DNBFDocument,
+        DNBFDocumentError,
+        DNBFMemberNode,
+        DNBFObjectNode,
+        MemberNotFoundError,
+        ObjectNotFoundError,
+    )
+    from dnbflib.indexer import DNBFRecordStore, StoredRecord
+    from dnbflib.records import (
+        BinaryObjectString,
+        BinaryTypeEnumeration,
+        PrimitiveTypeEnumeration,
+        RecordTypeEnumeration,
+    )
+    from dnbflib.writer import DNBFWriter
+    from dnbflib.yaml_export import export_dnbf_to_yaml, export_record_store_to_yaml, rebuild_yaml_export
 
 
 def __getattr__(name: str):
